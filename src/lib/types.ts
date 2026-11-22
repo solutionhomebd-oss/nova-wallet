@@ -9,6 +9,7 @@ export type TxCategory =
 
 export interface User {
   id: string; name: string; username: string; email: string; phone: string
+  emailVerified?: boolean
   passwordHash: string; pinHash: string; role: Role; status: UserStatus; kyc: KycStatus
   referralCode: string; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
   /** Firebase UID once the account is linked to the backend (Phase 1+). */

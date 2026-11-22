@@ -50,7 +50,7 @@ export const apiPost = (path: string, body: unknown) => call(path, { method: 'PO
 
 export async function apiBootstrap(
   token: string,
-  profile: { username: string; fullName: string; pinHash: string; phone?: string; referralCode?: string; sessionId?: string; deviceLabel?: string; turnstileToken?: string },
+  profile: { username: string; fullName: string; pinHash: string; phone?: string; referralCode?: string; sessionId?: string; deviceLabel?: string; turnstileToken?: string; verifyGrant?: string },
 ): Promise<any> {
   try {
     const res = await fetch(API_BASE + '/v1/bootstrap', {

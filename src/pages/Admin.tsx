@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Trash2, Loader2 } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Trash2, Loader2, Mail } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
-import { apiGet } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import { Avatar, Badge, Btn, Card, Empty, Input, Modal, MsgTicks, Select, TxDirIcon, statusTone } from '../components/ui'
 import { fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { COIN_META, useMarket } from '../lib/market'
@@ -24,6 +24,7 @@ const TABS = [
   { id: 'audit', label: 'Audit Log', icon: ScrollText },
   { id: 'reports', label: 'Reports & Export', icon: BarChart3 },
   { id: 'health', label: 'System Health', icon: Activity },
+  { id: 'emaillog', label: 'Email Log', icon: Mail },
   { id: 'payments', label: 'Payment Methods', icon: CreditCard },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ] as const
@@ -58,7 +59,7 @@ export default function Admin() {
   const myScope = user?.adminScope ?? 'full'
   const visibleTabs = TABS.filter(t => myScope === 'full' || (SCOPE_TABS[myScope] ?? []).includes(t.id))
   // System submenu (sidebar/drawer): Audit Log, Reports & Export, System Health.
-  const systemTabs = visibleTabs.filter(t => ['audit', 'reports', 'health'].includes(t.id))
+  const systemTabs = visibleTabs.filter(t => ['audit', 'reports', 'health', 'emaillog'].includes(t.id))
   const systemOpenEff = systemOpen || systemTabs.some(t => t.id === tab)
   useEffect(() => { if (!visibleTabs.some(t => t.id === tab)) setTab('overview') }, [tab, myScope])
   // Phase 3 UI state: feature switches, broadcast composer, global
@@ -69,6 +70,17 @@ export default function Admin() {
   const [searchOpen, setSearchOpen] = useState(false); const [searchQ, setSearchQ] = useState('')
   const [apiHealth, setApiHealth] = useState<any>(null)
   useEffect(() => { if (tab !== 'health') return; setApiHealth(null); apiGet('/health').then(r => setApiHealth(r)).catch(() => setApiHealth({ ok: false })) }, [tab])
+  const [emailLog, setEmailLog] = useState<any[] | null>(null)
+  const [testMailBusy, setTestMailBusy] = useState(false)
+  const loadEmailLog = () => { apiGet('/v1/admin/overview').then(r => setEmailLog(r?.overview?.emailLog ?? [])).catch(() => setEmailLog([])) }
+  useEffect(() => { if (tab === 'emaillog') { setEmailLog(null); loadEmailLog() } }, [tab])
+  const sendTestMail = async () => {
+    if (testMailBusy) return
+    setTestMailBusy(true)
+    try { await apiPost('/v1/admin/test-email', {}); toast({ kind: 'success', title: 'Test email sent', body: 'Check your inbox — delivery is working.' }); loadEmailLog() }
+    catch (e: any) { toast({ kind: 'error', title: e.message || 'Test email failed' }) }
+    finally { setTestMailBusy(false) }
+  }
   const downloadCsv = (name: string, rows: Record<string, any>[]) => {
     if (!rows.length) return toast({ kind: 'error', title: 'Nothing to export yet' })
     const keys = Object.keys(rows[0])
@@ -233,7 +245,7 @@ export default function Admin() {
             <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 lg:hidden"><X size={15} /></button>
           </div>
           <nav className="space-y-1">
-            {visibleTabs.filter(t => t.id !== 'kyc' && !['audit', 'reports', 'health'].includes(t.id)).map(t => {
+            {visibleTabs.filter(t => t.id !== 'kyc' && !['audit', 'reports', 'health', 'emaillog'].includes(t.id)).map(t => {
               const kycVisible = t.id === 'users' && visibleTabs.some(x => x.id === 'kyc')
               const kycOpen = usersOpen || tab === 'kyc'
               const badgeCls = "min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold inline-flex items-center justify-center"
@@ -749,6 +761,28 @@ export default function Admin() {
               <h3 className="font-extrabold flex items-center gap-2"><Download size={17} className="text-violet-500" /> Database backup</h3>
               <p className="text-xs text-slate-400 mt-1 mb-4">Download a full JSON snapshot of the live database — users, wallets, transactions, deposits, withdrawals, loans, KYC, tickets and settings. Keep it somewhere safe.</p>
               <Btn onClick={async () => { try { const r = await apiGet('/v1/admin/backup'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(r.backup, null, 1)], { type: 'application/json' })); a.download = 'novawallet-backup.json'; a.click(); URL.revokeObjectURL(a.href); toast({ kind: 'success', title: 'Backup downloaded' }) } catch (e: any) { toast({ kind: 'error', title: e.message }) } }}>Download backup</Btn>
+            </Card>
+          </div>
+        )}
+
+        {tab === 'emaillog' && (
+          <div className="anim-fade-up space-y-4">
+            <Card className="p-5">
+              <h3 className="font-extrabold flex items-center gap-2"><Mail size={17} className="text-violet-500" /> Email delivery</h3>
+              <p className="text-xs text-slate-400 mt-1 mb-4">Every email the system sends is recorded here — verification codes, transaction receipts and security alerts. Send a test to confirm delivery any time.</p>
+              <Btn disabled={testMailBusy} onClick={sendTestMail}>{testMailBusy ? <Loader2 size={16} className="animate-spin" /> : 'Send test email to my address'}</Btn>
+            </Card>
+            <Card className="p-5">
+              <h3 className="font-extrabold mb-1">Recent emails</h3>
+              <p className="text-xs text-slate-400 mb-4">Latest 50, newest first.</p>
+              {emailLog === null ? <p className="text-sm text-slate-400">Loading…</p> : emailLog.length === 0 ? <Empty title="No emails yet" body="When the system sends an email, it will show up here." /> : (
+                <div className="space-y-2">{emailLog.map((e: any) => (
+                  <div key={e.id} className="rounded-2xl border border-slate-200/70 dark:border-slate-800 p-3.5">
+                    <p className="font-bold text-sm flex items-center gap-2 flex-wrap">{e.subject} <Badge tone={e.status === 'sent' ? 'green' : 'red'}>{e.status}</Badge> <Badge tone="slate">{e.kind}</Badge></p>
+                    <p className="text-xs text-slate-400 mt-1">To {e.to} · {fmtDateTime(e.createdAt)}{e.error ? ' · ' + e.error : ''}</p>
+                  </div>
+                ))}</div>
+              )}
             </Card>
           </div>
         )}

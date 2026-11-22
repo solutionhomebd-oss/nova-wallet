@@ -399,16 +399,18 @@ async function loadState(db, uid, lite = false) {
   const loanRows = await db.prepare("SELECT * FROM loans WHERE user_id = ? ORDER BY created_at DESC").bind(uid).all();
   const stkRows = await db.prepare("SELECT * FROM stakes WHERE user_id = ? ORDER BY created_at DESC").bind(uid).all();
   const kycRow = await db.prepare("SELECT status, doc_type, doc_number, created_at FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(uid).first();
+  const prefRow = await db.prepare("SELECT tx_emails FROM user_email_prefs WHERE user_id = ?").bind(uid).first();
   const pmRows = await db.prepare("SELECT * FROM user_payment_methods WHERE user_id = ? ORDER BY created_at").bind(uid).all();
   const state = {
     profile: {
       id: me.id, email: me.email, username: me.username, name: me.full_name || "",
       phone: me.phone || "", ...(me.avatar_url ? { photo: me.avatar_url } : {}),
-      role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code,
+      role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code, emailVerified: Number(me.email_verified) === 1,
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
       ...(kycRow ? { kycDocType: kycRow.doc_type, kycDocNumber: kycRow.doc_number, kycSubmittedAt: isoOf(kycRow.created_at) } : {}),
     },
+    emailPrefs: { txEmails: !prefRow || Number(prefRow.tx_emails) !== 0 },
     payMethods: pmRows.results.map((m) => ({ id: m.id, type: m.type, label: m.label, detail: m.detail })),
     wallet: {
       userId: uid,
@@ -492,6 +494,7 @@ async function loadOverview(db) {
   transactions.sort(byDate); deposits.sort(byDate); withdrawals.sort(byDate); loans.sort(byDate); stakes.sort(byDate);
   const errRows = await db.prepare("SELECT * FROM client_errors ORDER BY created_at DESC LIMIT 50").all();
   const auditRows = await db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100").all();
+  const emailRows = await db.prepare("SELECT * FROM email_log ORDER BY created_at DESC LIMIT 50").all();
   return {
     users, wallets, transactions, deposits, withdrawals, loans, stakes,
     tickets: await loadTickets(db, null, "admin"),
@@ -499,6 +502,7 @@ async function loadOverview(db) {
     content: await loadContent(db),
     errors: errRows.results.map((e) => ({ id: e.id, userId: e.user_id, message: e.message, url: e.url, createdAt: isoOf(e.created_at) })),
     audit: auditRows.results.map((a) => ({ id: String(a.id), actor: a.actor, action: a.action, detail: a.detail, createdAt: isoOf(a.created_at) })),
+    emailLog: emailRows.results.map((e) => ({ id: e.id, to: e.to_email, kind: e.kind, subject: e.subject, status: e.status, error: e.error || undefined, createdAt: new Date(Number(e.created_at)).toISOString() })),
   };
 }
 
@@ -536,6 +540,23 @@ async function handleBootstrap(request, env, auth) {
     if (!existing.pin_hash_v2 && body.pinHash) {
       try { await db.prepare("UPDATE users SET pin_hash_v2 = ? WHERE id = ?").bind(await pbkdf2Hash(String(body.pinHash)), auth.uid).run(); } catch { /* best effort */ }
     }
+    // New-sign-in alert: a fresh session for an account that already has
+    // sessions means a new device/browser — email the owner (max once/day).
+    try {
+      const sid = body.sessionId ? String(body.sessionId) : "";
+      let fresh = true;
+      if (sid) { const sr = await db.prepare("SELECT revoked FROM user_sessions WHERE id = ? AND user_id = ?").bind(sid, auth.uid).first(); if (sr && !sr.revoked) fresh = false; }
+      if (fresh) {
+        const prior = await db.prepare("SELECT COUNT(*) AS c FROM user_sessions WHERE user_id = ?").bind(auth.uid).first();
+        if (prior && Number(prior.c) > 0) {
+          const last = await db.prepare("SELECT created_at FROM email_log WHERE user_id = ? AND kind = 'security' AND subject LIKE 'New sign-in%' ORDER BY created_at DESC LIMIT 1").bind(auth.uid).first();
+          if (!last || Date.now() - Number(last.created_at) > 86400000) {
+            const device = String(body.deviceLabel || request.headers.get("User-Agent") || "Unknown device").slice(0, 120);
+            await sendUserEmail(env, db, auth.uid, "security", "New sign-in to your NovaWallet account", "New sign-in alert", ["Your NovaWallet account was just signed in on a new session.", "Device: " + device, "IP address: " + (clientIp(request) || "unknown"), "Time: " + new Date().toUTCString(), "If this was not you, change your password immediately and contact support@novawallet.pp.ua."]);
+          }
+        }
+      }
+    } catch { /* alert is best effort */ }
     const sessionId = await ensureSession(db, request, auth, body);
     return json(request, {
       ok: true,
@@ -574,11 +595,23 @@ async function handleBootstrap(request, env, auth) {
     const ref = await db.prepare("SELECT id FROM users WHERE referral_code = ?").bind(String(body.referralCode).trim()).first();
     if (ref && ref.id !== auth.uid) referrerId = ref.id;
   }
+  // Registration email verification: a valid grant (from /v1/verify-email)
+  // marks the new account's email as verified and is consumed here.
+  let emailVerified = 0;
+  if (body.verifyGrant) {
+    try {
+      const vr = await db.prepare("SELECT grant_hash, grant_expires FROM email_verifications WHERE email = ?").bind(email).first();
+      if (vr?.grant_hash && Number(vr.grant_expires) > Date.now() && (await sha256Hex(String(body.verifyGrant))) === vr.grant_hash) {
+        emailVerified = 1;
+        await db.prepare("DELETE FROM email_verifications WHERE email = ?").bind(email).run();
+      }
+    } catch { /* verification is best effort at bootstrap */ }
+  }
   const walletId = crypto.randomUUID();
   const stmts = [
     db.prepare(
-      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId),
+      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId, emailVerified),
     db.prepare("INSERT INTO user_profiles (user_id, full_name) VALUES (?, ?)").bind(auth.uid, fullName),
     db.prepare("INSERT INTO wallets (id, user_id) VALUES (?, ?)").bind(walletId, auth.uid),
     db.prepare("INSERT INTO wallet_balances (wallet_id, currency, available, locked) VALUES (?, 'BDT', 0, 0)").bind(walletId),
@@ -592,6 +625,7 @@ async function handleBootstrap(request, env, auth) {
     return json(request, { error: "bootstrap_failed", detail: String(e?.message || e) }, 500);
   }
   const sessionId = await ensureSession(db, request, auth, body);
+  await sendUserEmail(env, db, auth.uid, "account", "Welcome to NovaWallet", "Welcome to NovaWallet", ["Hello " + fullName + ", your NovaWallet account is ready.", "You can add money, send and receive payments, trade crypto and more — all from the app. If you ever need help, write to support@novawallet.pp.ua."]);
   return json(request, { ok: true, created: true, sessionId, user: { id: auth.uid, email, username, role: "user" } });
 }
 
@@ -604,7 +638,7 @@ async function handleMe(request, env, auth) {
     user: {
       id: row.id, email: row.email, username: row.username, fullName: row.full_name,
       phone: row.phone, role: row.role, status: row.status, level: row.level,
-      referralCode: row.referral_code, pinHash: row.pin_hash,
+      referralCode: row.referral_code, pinHash: row.pin_hash, emailVerified: Number(row.email_verified) === 1,
       walletId: wallet ? wallet.id : null,
     },
   });
@@ -742,6 +776,8 @@ async function handleSend(request, env, auth, body) {
   }
   const state = await loadState(db, auth.uid);
   await notifyServer(db, toUserId, "tx", "💰 Money received", (sender.full_name || sender.username) + " sent you ৳" + Number(amount).toLocaleString("en-US") + (note ? " — " + note : ""), "/transactions?tx=" + recvTx.pub);
+  await sendUserEmail(env, db, toUserId, "tx", "You received " + fmtTk(amount) + " from " + (sender.full_name || sender.username), "Money received", [(sender.full_name || sender.username) + " sent you " + fmtTk(amount) + (note ? " — \u201C" + note + "\u201D" : "") + ". The amount is available in your wallet now."], fmtTk(amount));
+  await sendUserEmail(env, db, auth.uid, "tx", "You sent " + fmtTk(amount) + " to " + (recipient.full_name || recipient.username), "Money sent", ["You sent " + fmtTk(amount) + " to " + (recipient.full_name || recipient.username) + ". Fee: " + fmtTk(fee) + ". Transaction ID: " + sendTx.pub + "."], fmtTk(amount));
   return json(request, {
     ok: true, state,
     tx: { id: sendTx.pub, userId: auth.uid, category: "send", title: "Sent to " + (recipient.full_name || recipient.username), amount, fee, currency: "BDT", status: "completed", note: note || undefined, counterparty: recipient.full_name || recipient.username, createdAt: nowISO() },
@@ -838,6 +874,7 @@ async function handleDirectWithdraw(request, env, auth, body) {
   } catch (e) {
     return json(request, { error: "Direct withdraw failed: " + String(e?.message || e) }, 500);
   }
+  await sendUserEmail(env, db, auth.uid, "tx", "Withdrawal completed — " + fmtTk(amount), "Withdrawal completed", ["Your direct withdrawal of " + fmtTk(amount) + " to " + destination + " has been completed. Fee: " + fmtTk(fee) + "."], fmtTk(amount));
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
 
@@ -1681,11 +1718,13 @@ async function handleAdminKycDecide(request, env, auth, body) {
     await db.prepare("INSERT INTO kyc_submissions (id, user_id, doc_type, doc_number, status, reviewed_by) VALUES (?, ?, 'manual', '', 'verified', ?)")
       .bind(pubId("KYC"), target, auth.uid).run();
     await notifyServer(db, target, "security", "✅ Verified by NovaWallet", "Your identity was verified by the NovaWallet team. All limits and features are unlocked.", null);
+  await sendUserEmail(env, db, target, "account", "Your NovaWallet identity is verified", "Identity verified", ["Your identity was verified by the NovaWallet team. All limits and features are now unlocked."]);
     return json(request, { ok: true, overview: await loadOverview(db) });
   }
   await db.prepare("UPDATE kyc_submissions SET status = ?, reviewed_by = ? WHERE id = ?")
     .bind(body.ok ? "verified" : "unverified", auth.uid, row.id).run();
   await notifyServer(db, target, "security", body.ok ? "✅ KYC verified" : "KYC not approved", body.ok ? "Your identity is verified. All limits and features are unlocked." : "Your KYC submission was not approved. Please check your documents and submit again.", null);
+  await sendUserEmail(env, db, target, "account", body.ok ? "Your NovaWallet identity is verified" : "KYC not approved — action needed", body.ok ? "Identity verified" : "KYC not approved", [body.ok ? "Your identity verification is complete. All limits and features are now unlocked." : "Your KYC submission was not approved. Please check your documents and submit again from the app."]);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -1746,6 +1785,7 @@ async function handleDecideDeposit(request, env, auth, body) {
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
   if (bonusGranted > 0) await auditLog(db, auth, "deposit.bonus", dep.id + " · first deposit · bonus +" + bonusGranted);
   await notifyServer(db, dep.user_id, "deposit", ok ? "Deposit approved" : "Deposit rejected", ok ? "Your deposit of " + dep.amount + " was approved and credited." + (bonusGranted > 0 ? " 🎁 First-deposit bonus: +" + bonusGranted + " credited — you received double!" : "") : "Your deposit of " + dep.amount + " was rejected. Please check the details and try again.", null);
+  await sendUserEmail(env, db, dep.user_id, "tx", ok ? "Deposit approved — " + fmtTk(dep.amount) + " credited" : "Deposit not approved", ok ? "Deposit approved" : "Deposit not approved", [ok ? "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " has been approved and credited to your wallet." + (bonusGranted > 0 ? " You also received a first-deposit bonus of " + fmtTk(bonusGranted) + "." : "") : "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " was not approved, so nothing was credited. Please check the details and try again, or contact support."], ok ? fmtTk(Number(dep.amount) + bonusGranted) + " credited" : undefined);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -1763,6 +1803,7 @@ async function handleDecideWithdraw(request, env, auth, body) {
   ];
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
   await notifyServer(db, wd.user_id, "withdraw", ok ? "Cash out completed" : "Cash out rejected", ok ? "Your cash out of " + wd.amount + " has been sent." : "Your cash out of " + wd.amount + " was rejected and the amount returned to your balance.", null);
+  await sendUserEmail(env, db, wd.user_id, "tx", ok ? "Cash out completed — " + fmtTk(wd.amount) : "Cash out not approved", ok ? "Cash out completed" : "Cash out not approved", [ok ? "Your cash out of " + fmtTk(wd.amount) + " to " + wd.destination + " has been completed." : "Your cash out of " + fmtTk(wd.amount) + " was not approved. The full amount has been returned to your wallet balance."]);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -1781,6 +1822,7 @@ async function handleDecideLoan(request, env, auth, body) {
   }
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
   await notifyServer(db, loan.user_id, "loan", ok ? "Loan approved" : "Loan rejected", ok ? "Your loan of " + loan.principal + " was approved and credited to your wallet." : "Your loan application of " + loan.principal + " was not approved.", null);
+  await sendUserEmail(env, db, loan.user_id, "tx", ok ? "Loan approved — " + fmtTk(loan.principal) + " disbursed" : "Loan application not approved", ok ? "Loan approved" : "Loan application update", [ok ? "Your loan of " + fmtTk(loan.principal) + " has been approved and credited to your wallet. Your monthly payment is " + fmtTk(loan.emi) + " over " + loan.months + " months." : "Your loan application of " + fmtTk(loan.principal) + " was not approved this time. You can apply again from the app."]);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -2136,10 +2178,16 @@ const OTP_ERR = {
   attempts: "Too many incorrect attempts. Please request a new code.",
   wrong: "Incorrect code \u2014 please check and try again.",
 };
-function otpEmailText(code) {
-  return "Hello,\n\nUse this verification code to reset your NovaWallet password:\n\n" + code + "\n\nThis code expires in 2 minutes. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.\n\nIf you didn't request a password reset, please ignore this email. Your password will stay unchanged.\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
+const OTP_PURPOSE = {
+  reset: { heading: "Password reset verification", intro: "Use the verification code below to reset your NovaWallet password:", ignore: "If you didn't request a password reset, please ignore this email. Your password will stay unchanged." },
+  verify: { heading: "Verify your email address", intro: "Use the verification code below to complete your NovaWallet registration:", ignore: "If you didn't create a NovaWallet account, please ignore this email." },
+  change: { heading: "Confirm your new email address", intro: "Use the verification code below to confirm this email address for your NovaWallet account:", ignore: "If you didn't request an email change, please ignore this email and contact support." },
+};
+function otpEmailText(code, purpose = "reset") {
+  const p = OTP_PURPOSE[purpose] || OTP_PURPOSE.reset;
+  return "Hello,\n\n" + p.intro + "\n\n" + code + "\n\nThis code expires in 2 minutes. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.\n\n" + p.ignore + "\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
 }
-function otpEmailHtml(code) {
+function emailShell(heading, innerHtml) {
   return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>" +
   "<body style=\"margin:0;padding:0;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;\">" +
   "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#f1f5f9;padding:32px 12px;\"><tr><td align=\"center\">" +
@@ -2147,27 +2195,178 @@ function otpEmailHtml(code) {
   "<tr><td style=\"background:linear-gradient(135deg,#7c3aed 0%,#06b6d4 100%);padding:28px 36px;\">" +
   "<div style=\"font-size:24px;font-weight:bold;color:#ffffff;letter-spacing:.3px;\">NovaWallet</div>" +
   "<div style=\"font-size:13px;color:#e0e7ff;margin-top:4px;\">Secure digital wallet</div></td></tr>" +
-  "<tr><td style=\"padding:32px 36px 8px;\">" +
-  "<div style=\"font-size:17px;font-weight:bold;color:#0f172a;\">Password reset verification</div>" +
-  "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:12px 0 0;\">Hello,</p>" +
-  "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:8px 0 0;\">Use the verification code below to reset your NovaWallet password:</p></td></tr>" +
-  "<tr><td style=\"padding:20px 36px 4px;\">" +
-  "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:18px 12px;text-align:center;font-size:34px;font-weight:bold;letter-spacing:10px;color:#4c1d95;\">" + code + "</div></td></tr>" +
-  "<tr><td style=\"padding:16px 36px 28px;\">" +
-  "<p style=\"font-size:13px;line-height:1.65;color:#64748b;margin:0;\">This code expires in <b>2 minutes</b>. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.</p>" +
-  "<p style=\"font-size:13px;line-height:1.65;color:#64748b;margin:10px 0 0;\">If you didn't request a password reset, please ignore this email. Your password will stay unchanged.</p></td></tr>" +
+  "<tr><td style=\"padding:32px 36px 28px;\">" +
+  "<div style=\"font-size:17px;font-weight:bold;color:#0f172a;\">" + heading + "</div>" + innerHtml +
+  "</td></tr>" +
   "<tr><td style=\"border-top:1px solid #e2e8f0;padding:18px 36px;background-color:#f8fafc;\">" +
   "<div style=\"font-size:12px;color:#94a3b8;line-height:1.6;\">Thank you,<br><b style=\"color:#64748b;\">The NovaWallet Team</b><br><a href=\"https://www.novawallet.pp.ua\" style=\"color:#7c3aed;text-decoration:none;\">novawallet.pp.ua</a> \u00B7 Support: support@novawallet.pp.ua</div></td></tr>" +
   "</table>" +
   "<div style=\"font-size:11px;color:#94a3b8;margin-top:16px;\">This is an automated message from NovaWallet. Please do not reply to this email.</div>" +
   "</td></tr></table></body></html>";
 }
+function otpEmailHtml(code, purpose = "reset") {
+  const p = OTP_PURPOSE[purpose] || OTP_PURPOSE.reset;
+  const para = (t) => "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:12px 0 0;\">" + t + "</p>";
+  const small = (t) => "<p style=\"font-size:13px;line-height:1.65;color:#64748b;margin:12px 0 0;\">" + t + "</p>";
+  return emailShell(p.heading,
+    para("Hello,") + para(p.intro) +
+    "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:18px 12px;text-align:center;font-size:34px;font-weight:bold;letter-spacing:10px;color:#4c1d95;margin-top:20px;\">" + code + "</div>" +
+    small("This code expires in <b>2 minutes</b>. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.") +
+    small(p.ignore));
+}
+// A generic branded email (transaction notices, security alerts, …).
+function brandedEmail(heading, paras, highlight) {
+  const text = heading + "\n\n" + paras.join("\n\n") + (highlight ? "\n\n" + highlight : "") + "\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
+  const para = (t) => "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:12px 0 0;\">" + t + "</p>";
+  const hl = highlight ? "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:16px;text-align:center;font-size:20px;font-weight:bold;color:#4c1d95;margin-top:20px;\">" + highlight + "</div>" : "";
+  return { text, html: emailShell(heading, paras.map(para).join("") + hl) };
+}
+const fmtTk = (n) => "\u09F3" + Math.round(Number(n)).toLocaleString("en-US");
+async function logEmail(db, e) {
+  try { await db.prepare("INSERT INTO email_log (user_id, to_email, kind, subject, status, error, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(e.userId || null, e.to || "", e.kind || "", e.subject || "", e.status || "", e.error ? String(e.error).slice(0, 300) : null, e.ip || null, Date.now()).run(); } catch { /* ignore */ }
+}
+async function sendAndLog(env, db, { userId, to, kind, subject, text, html, ip }) {
+  const r = await sendEmail(env, { to, subject, text, html });
+  await logEmail(db, { userId, to, kind, subject, status: r.sent ? "sent" : "failed", error: r.sent ? null : r.reason, ip });
+  return r;
+}
+// Sends a branded email to a user by id. kind "tx" respects the user's
+// transaction-email preference; other kinds always send. Never throws.
+async function sendUserEmail(env, db, uid, kind, subject, heading, paras, highlight) {
+  try {
+    const u = await db.prepare("SELECT email FROM users WHERE id = ?").bind(uid).first();
+    if (!u?.email) return;
+    if (kind === "tx") {
+      const pref = await db.prepare("SELECT tx_emails FROM user_email_prefs WHERE user_id = ?").bind(uid).first();
+      if (pref && Number(pref.tx_emails) === 0) return;
+    }
+    const { text, html } = brandedEmail(heading, paras, highlight);
+    await sendAndLog(env, db, { userId: uid, to: u.email, kind, subject, text, html });
+  } catch { /* email never breaks the action */ }
+}
+// Abuse gate for the public OTP endpoints: max 5 codes/hour per email,
+// 10/hour per IP, 400/day overall (protects the Gmail sending quota).
+// Returns seconds to wait, or 0 when the request may proceed.
+async function otpRateGate(db, email, ip) {
+  try {
+    const hourAgo = Date.now() - 3600000;
+    const perEmail = await db.prepare("SELECT COUNT(*) AS c, MIN(created_at) AS oldest FROM email_log WHERE kind IN ('otp', 'verify') AND status = 'sent' AND to_email = ? AND created_at > ?").bind(email, hourAgo).first();
+    if (perEmail && Number(perEmail.c) >= 5) return Math.max(1, Math.ceil((Number(perEmail.oldest) + 3600000 - Date.now()) / 1000));
+    if (ip) {
+      const perIp = await db.prepare("SELECT COUNT(*) AS c, MIN(created_at) AS oldest FROM email_log WHERE kind IN ('otp', 'verify') AND status = 'sent' AND ip = ? AND created_at > ?").bind(ip, hourAgo).first();
+      if (perIp && Number(perIp.c) >= 10) return Math.max(1, Math.ceil((Number(perIp.oldest) + 3600000 - Date.now()) / 1000));
+    }
+    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+    const total = await db.prepare("SELECT COUNT(*) AS c FROM email_log WHERE kind IN ('otp', 'verify') AND status = 'sent' AND created_at > ?").bind(dayStart.getTime()).first();
+    if (total && Number(total.c) >= 400) return 3600;
+  } catch { /* a gate failure never blocks a legitimate request */ }
+  return 0;
+}
+async function firebaseAccountUpdate(env, fields) {
+  const token = await firebaseAdminToken(env);
+  const r = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: JSON.stringify({ returnSecureToken: false, ...fields }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("accounts_update_" + (j?.error?.message || r.status));
+  return j;
+}
+// ---- Email preferences, email change, misc email endpoints ----------------
+async function handleEmailPrefs(request, env, auth, body) {
+  const db = env.DB;
+  const tx = body.txEmails ? 1 : 0;
+  await db.prepare("INSERT INTO user_email_prefs (user_id, tx_emails) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET tx_emails = excluded.tx_emails").bind(auth.uid, tx).run();
+  return json(request, { ok: true, emailPrefs: { txEmails: tx === 1 } });
+}
+async function handlePasswordChangedNotice(request, env, auth) {
+  const db = env.DB;
+  await sendUserEmail(env, db, auth.uid, "security", "Your NovaWallet password was changed", "Password changed", ["Your NovaWallet password was just changed in the app.", "If this was not you, contact support immediately at support@novawallet.pp.ua and secure your account."]);
+  return json(request, { ok: true });
+}
+async function handleEmailChangeRequest(request, env, auth, body) {
+  const db = env.DB;
+  const newEmail = String(body.newEmail || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return json(request, { error: "Enter a valid email address." }, 400);
+  const me = await getUserRow(db, auth.uid);
+  if (!me) return json(request, { error: "Account not found." }, 404);
+  if (newEmail === (me.email || "").toLowerCase()) return json(request, { error: "That is already your email address." }, 400);
+  const taken = await db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").bind(newEmail, auth.uid).first();
+  if (taken) return json(request, { error: "That email is already in use by another account." }, 400);
+  const now = Date.now();
+  const prev = await db.prepare("SELECT code_hash, expires_at FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
+  if (prev?.code_hash && Number(prev.expires_at) > now) {
+    return json(request, { ok: true, waitSeconds: Math.ceil((Number(prev.expires_at) - now) / 1000) });
+  }
+  const gate = await otpRateGate(db, newEmail, clientIp(request));
+  if (gate > 0) return json(request, { ok: true, waitSeconds: gate });
+  const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+  const codeHash = await sha256Hex(newEmail + ":" + code);
+  await db.prepare("INSERT INTO email_changes (user_id, new_email, code_hash, expires_at, attempts, last_sent_at) VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT(user_id) DO UPDATE SET new_email = excluded.new_email, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at")
+    .bind(auth.uid, newEmail, codeHash, now + 2 * 60000, now).run();
+  const r = await sendAndLog(env, db, { userId: auth.uid, to: newEmail, kind: "verify", subject: "Confirm your new NovaWallet email address", text: otpEmailText(code, "change"), html: otpEmailHtml(code, "change"), ip: clientIp(request) });
+  if (!r.sent) {
+    try { await db.prepare("DELETE FROM email_changes WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
+    return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
+  }
+  return json(request, { ok: true, waitSeconds: 0 });
+}
+async function handleEmailChangeConfirm(request, env, auth, body) {
+  const db = env.DB;
+  const code = String(body.code || "").trim();
+  const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
+  if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
+  if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
+  if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
+  const h = await sha256Hex(row.new_email + ":" + code);
+  if (h !== row.code_hash) {
+    await db.prepare("UPDATE email_changes SET attempts = attempts + 1 WHERE user_id = ?").bind(auth.uid).run();
+    return json(request, { error: OTP_ERR.wrong }, 400);
+  }
+  if (!env.FIREBASE_SA) return json(request, { error: "not_configured" }, 503);
+  const me = await getUserRow(db, auth.uid);
+  const oldEmail = me?.email || "";
+  try {
+    await firebaseAccountUpdate(env, { localId: auth.uid, email: row.new_email });
+  } catch (e) {
+    if (String(e?.message || e).includes("EMAIL_EXISTS")) return json(request, { error: "That email is already in use by another account." }, 400);
+    return json(request, { error: "Email change failed on the server. Please try again." }, 500);
+  }
+  const sid = request.headers.get("X-Session-Id") || "";
+  await db.batch([
+    db.prepare("UPDATE users SET email = ?, email_verified = 1 WHERE id = ?").bind(row.new_email, auth.uid),
+    db.prepare("DELETE FROM email_changes WHERE user_id = ?").bind(auth.uid),
+    db.prepare("DELETE FROM user_sessions WHERE user_id = ? AND id != ?").bind(auth.uid, sid),
+  ]);
+  await notifyServer(db, auth.uid, "security", "Email address changed", "Your NovaWallet account email was changed to " + row.new_email + ". If this was not you, contact support immediately.", null);
+  if (oldEmail && oldEmail !== row.new_email) {
+    const { text, html } = brandedEmail("Email address changed", ["The email address on your NovaWallet account was changed to " + row.new_email + ".", "If this was not you, contact support immediately at support@novawallet.pp.ua."]);
+    await sendAndLog(env, db, { userId: auth.uid, to: oldEmail, kind: "security", subject: "Your NovaWallet email address was changed", text, html });
+  }
+  await sendUserEmail(env, db, auth.uid, "account", "This email is now linked to your NovaWallet account", "Email address updated", ["This email address (" + row.new_email + ") is now the email on your NovaWallet account."]);
+  return json(request, { ok: true, email: row.new_email });
+}
+async function handleAdminTestEmail(request, env, auth) {
+  const db = env.DB;
+  const me = await getUserRow(db, auth.uid);
+  if (!me?.email) return json(request, { error: "Your admin account has no email address." }, 400);
+  const { text, html } = brandedEmail("Test email", ["This is a test email from your NovaWallet admin panel.", "If you received this, email delivery (Gmail SMTP) is working correctly."]);
+  const r = await sendAndLog(env, db, { userId: auth.uid, to: me.email, kind: "test", subject: "NovaWallet test email", text, html, ip: clientIp(request) });
+  if (!r.sent) return json(request, { error: "Test email failed: " + r.reason }, 502);
+  return json(request, { ok: true });
+}
+
 async function handlePasswordRequestOtp(request, env, body) {
   const db = env.DB;
   const email = String(body.email || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(request, { error: "Enter a valid email address." }, 400);
   const smtpReady = !!(env.SMTP_USER && env.SMTP_PASS);
   const user = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (user && smtpReady) {
+    const gate = await otpRateGate(db, email, clientIp(request));
+    if (gate > 0) return json(request, { ok: true, emailed: true, waitSeconds: gate });
+  }
   if (user) {
     const now = Date.now();
     const prev = await db.prepare("SELECT code_hash, expires_at FROM password_otps WHERE email = ?").bind(email).first();
@@ -2183,17 +2382,108 @@ async function handlePasswordRequestOtp(request, env, body) {
     await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
       .bind(email, user.id, codeHash, now + 2 * 60000, now).run();
     if (smtpReady) {
-      const r = await sendEmail(env, {
-        to: email,
+      const r = await sendAndLog(env, db, {
+        userId: user.id, to: email, kind: "otp",
         subject: "Your NovaWallet verification code",
-        text: otpEmailText(code),
-        html: otpEmailHtml(code),
+        text: otpEmailText(code, "reset"),
+        html: otpEmailHtml(code, "reset"),
+        ip: clientIp(request),
       });
-      if (!r.sent) { try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(user.id, ("smtp_failed: " + r.reason).slice(0, 500)).run(); } catch { /* ignore */ } }
+      if (!r.sent) {
+        // The code exists but the email never left — cancel it so the user
+        // is not stuck behind the resend lock and can retry right away.
+        try { await db.prepare("DELETE FROM password_otps WHERE email = ?").bind(email).run(); } catch { /* ignore */ }
+        return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
+      }
     }
   }
   return json(request, { ok: true, emailed: smtpReady, waitSeconds: 0 });
 }
+// Forgot password, method 2: verify the transaction PIN server-side (the
+// PBKDF2 verifier + lockout live in checkPin) and set the real Firebase
+// password — the PIN method now works from any device, not just locally.
+async function handlePasswordResetByPin(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  const pin = String(body.pin || "");
+  const newPassword = String(body.newPassword || "");
+  if (newPassword.length < 6) return json(request, { error: "Password must be at least 6 characters." }, 400);
+  const user = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (!user) return json(request, { error: "account_not_on_server" }, 404);
+  const pinErr = await checkPin(db, user.id, pin);
+  if (pinErr) return json(request, { error: pinErr }, 400);
+  if (!env.FIREBASE_SA) return json(request, { error: "not_configured" }, 503);
+  try {
+    await firebaseAccountUpdate(env, { localId: user.id, password: newPassword });
+  } catch (e) {
+    try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(user.id, ("password_reset_pin_failed: " + String(e?.message || e)).slice(0, 500)).run(); } catch { /* ignore */ }
+    return json(request, { error: "Password reset failed on the server. Please try again." }, 500);
+  }
+  await db.prepare("DELETE FROM user_sessions WHERE user_id = ?").bind(user.id).run();
+  await notifyServer(db, user.id, "security", "Password reset", "Your password was reset using your transaction PIN. If this was not you, contact support immediately.", null);
+  await sendUserEmail(env, db, user.id, "security", "Your NovaWallet password was changed", "Password changed", ["Your NovaWallet password was changed using your transaction PIN.", "If this was not you, contact support immediately at support@novawallet.pp.ua and secure your account."]);
+  return json(request, { ok: true });
+}
+
+// Registration email verification: same OTP discipline as password reset
+// (2-minute code, resend lock, rate gate), kept in its own table. Confirming
+// returns a single-use grant that bootstrap consumes to mark the new
+// account's email as verified.
+async function handleVerifyEmailRequest(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(request, { error: "Enter a valid email address." }, 400);
+  const smtpReady = !!(env.SMTP_USER && env.SMTP_PASS);
+  const existing = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (existing) return json(request, { ok: true, emailed: smtpReady, waitSeconds: 0, alreadyRegistered: true });
+  if (smtpReady) {
+    const gate = await otpRateGate(db, email, clientIp(request));
+    if (gate > 0) return json(request, { ok: true, emailed: true, waitSeconds: gate });
+  }
+  const now = Date.now();
+  const prev = await db.prepare("SELECT code_hash, expires_at FROM email_verifications WHERE email = ?").bind(email).first();
+  if (prev?.code_hash && Number(prev.expires_at) > now) {
+    return json(request, { ok: true, emailed: smtpReady, waitSeconds: Math.ceil((Number(prev.expires_at) - now) / 1000) });
+  }
+  const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+  const codeHash = await sha256Hex(email + ":" + code);
+  await db.prepare("INSERT INTO email_verifications (email, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
+    .bind(email, codeHash, now + 2 * 60000, now).run();
+  if (smtpReady) {
+    const r = await sendAndLog(env, db, {
+      userId: null, to: email, kind: "verify",
+      subject: "Verify your NovaWallet email address",
+      text: otpEmailText(code, "verify"),
+      html: otpEmailHtml(code, "verify"),
+      ip: clientIp(request),
+    });
+    if (!r.sent) {
+      try { await db.prepare("DELETE FROM email_verifications WHERE email = ?").bind(email).run(); } catch { /* ignore */ }
+      return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
+    }
+  }
+  return json(request, { ok: true, emailed: smtpReady, waitSeconds: 0 });
+}
+async function handleVerifyEmailConfirm(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  const code = String(body.code || "").trim();
+  const row = await db.prepare("SELECT * FROM email_verifications WHERE email = ?").bind(email).first();
+  if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
+  if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
+  if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
+  const h = await sha256Hex(email + ":" + code);
+  if (h !== row.code_hash) {
+    await db.prepare("UPDATE email_verifications SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
+    return json(request, { error: OTP_ERR.wrong }, 400);
+  }
+  const grantBytes = crypto.getRandomValues(new Uint8Array(32));
+  const grant = [...grantBytes].map(b => b.toString(16).padStart(2, "0")).join("");
+  await db.prepare("UPDATE email_verifications SET code_hash = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
+    .bind(await sha256Hex(grant), Date.now() + 30 * 60000, email).run();
+  return json(request, { ok: true, grant });
+}
+
 async function handlePasswordVerifyOtp(request, env, body) {
   const db = env.DB;
   const email = String(body.email || "").trim().toLowerCase();
@@ -2225,14 +2515,7 @@ async function handlePasswordResetByOtp(request, env, body) {
   }
   if (!env.FIREBASE_SA) return json(request, { error: "not_configured" }, 503);
   try {
-    const token = await firebaseAdminToken(env);
-    const r = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({ localId: row.user_id, password: newPassword, returnSecureToken: false }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error("accounts_update_" + (j?.error?.message || r.status));
+    await firebaseAccountUpdate(env, { localId: row.user_id, password: newPassword });
   } catch (e) {
     try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(row.user_id, ("password_reset_failed: " + String(e?.message || e)).slice(0, 500)).run(); } catch { /* ignore */ }
     return json(request, { error: "Password reset failed on the server. Please try again." }, 500);
@@ -2242,6 +2525,7 @@ async function handlePasswordResetByOtp(request, env, body) {
     db.prepare("DELETE FROM user_sessions WHERE user_id = ?").bind(row.user_id),
   ]);
   await notifyServer(db, row.user_id, "security", "Password reset", "Your password was reset using an email verification code. If this was not you, contact support immediately.", null);
+  await sendUserEmail(env, db, row.user_id, "security", "Your NovaWallet password was changed", "Password changed", ["Your NovaWallet password was changed using an email verification code.", "If this was not you, contact support immediately at support@novawallet.pp.ua and secure your account."]);
   return json(request, { ok: true });
 }
 
@@ -2272,12 +2556,15 @@ export default {
     // Email-OTP password reset (public: the user is logged out). The OTP
     // itself is generated, hashed and verified server-side; the email goes
     // out over Gmail SMTP when the SMTP secrets are configured.
-    if (path.startsWith("/v1/password/") && request.method === "POST") {
+    if ((path.startsWith("/v1/password/") || path.startsWith("/v1/verify-email/")) && request.method === "POST") {
       let b = {};
       try { b = await request.json(); } catch { /* ignore */ }
       if (path === "/v1/password/request-otp") return await handlePasswordRequestOtp(request, env, b);
       if (path === "/v1/password/verify-otp") return await handlePasswordVerifyOtp(request, env, b);
       if (path === "/v1/password/reset") return await handlePasswordResetByOtp(request, env, b);
+      if (path === "/v1/password/reset-by-pin") return await handlePasswordResetByPin(request, env, b);
+      if (path === "/v1/verify-email/request") return await handleVerifyEmailRequest(request, env, b);
+      if (path === "/v1/verify-email/confirm") return await handleVerifyEmailConfirm(request, env, b);
     }
 
     if (!path.startsWith("/v1/")) return json(request, { error: "not_found" }, 404);
@@ -2351,10 +2638,15 @@ export default {
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
           case "/v1/levels/request": return await handleLevelRequest(request, env, auth, body);
+          case "/v1/email-prefs": return await handleEmailPrefs(request, env, auth, body);
+          case "/v1/email-change/request": return await handleEmailChangeRequest(request, env, auth, body);
+          case "/v1/email-change/confirm": return await handleEmailChangeConfirm(request, env, auth, body);
+          case "/v1/security/password-changed": return await handlePasswordChangedNotice(request, env, auth);
         }
         if (path.startsWith("/v1/admin/")) {
           if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);
           switch (path) {
+            case "/v1/admin/test-email": return await handleAdminTestEmail(request, env, auth);
             case "/v1/admin/decide-deposit": return await handleDecideDeposit(request, env, auth, body);
             case "/v1/admin/decide-withdraw": return await handleDecideWithdraw(request, env, auth, body);
             case "/v1/admin/decide-loan": return await handleDecideLoan(request, env, auth, body);

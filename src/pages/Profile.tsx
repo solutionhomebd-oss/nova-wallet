@@ -18,7 +18,7 @@ const SUPPORT_CHANNELS = [
   { label: 'Email', href: 'mailto:support@novawallet.pp.ua', icon: Mail, cls: 'bg-violet-600' },
 ]
 export default function Profile() {
-  const { user, db, walletOf, updateProfile, changePassword, changePin, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
+  const { user, db, walletOf, updateProfile, changePassword, changePin, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, emailPrefs, setTxEmails, requestEmailChange, confirmEmailChange, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
   const wEarlyP = db.wallets.find(x => x.userId === user?.id)
   const { coins } = useMarket(wEarlyP && Object.entries(wEarlyP.holdings).some(([s, a]) => s !== 'USDT' && a > 0) ? 10_000 : 60_000)
   const navigate = useNavigate()
@@ -160,8 +160,34 @@ export default function Profile() {
     ['p_edit', 'edit', <UserRound size={18} />], ['p_password', 'pw', <KeyRound size={18} />], ['p_pin', 'pin', <Hash size={18} />],
     ['p_login_options', 'login', <Fingerprint size={18} />], ['p_kyc', 'kyc', <ShieldCheck size={18} />], ['p_methods', 'methods', <CreditCard size={18} />],
     ['p_notif', 'notif', <Bell size={18} />], ['p_language', 'lang', <Globe size={18} />], ['p_currency', 'currency', <Coins size={18} />],
-    ['p_sessions', 'sessions', <Smartphone size={18} />], ['p_terms', 'terms', <FileText size={18} />],
+    ['p_sessions', 'sessions', <Smartphone size={18} />], ['p_email', 'email', <Mail size={18} />], ['p_terms', 'terms', <FileText size={18} />],
   ]
+  const [ecStep, setEcStep] = useState<'view' | 'code'>('view'); const [ecEmail, setEcEmail] = useState(''); const [ecCode, setEcCode] = useState(''); const [ecBusy, setEcBusy] = useState(false)
+  const sendEcCode = async () => {
+    if (ecBusy) return
+    setEcBusy(true)
+    try {
+      const r = await requestEmailChange(ecEmail)
+      if (r.error) { toast({ kind: 'error', title: r.error }); return }
+      if (r.waitSeconds > 0) {
+        const m = Math.floor(r.waitSeconds / 60), ss = String(r.waitSeconds % 60).padStart(2, '0')
+        toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${ecEmail.trim().toLowerCase()}. It stays valid for ${m}:${ss} more — enter it below.` })
+      } else {
+        toast({ kind: 'success', title: 'Code sent', body: 'Enter the 6-digit code sent to your new email address.' })
+      }
+      setEcCode(''); setEcStep('code')
+    } finally { setEcBusy(false) }
+  }
+  const confirmEc = async () => {
+    if (ecBusy) return
+    setEcBusy(true)
+    try {
+      const e = await confirmEmailChange(ecCode)
+      if (e) { toast({ kind: 'error', title: e }); return }
+      toast({ kind: 'success', title: 'Email changed', body: 'Your account email is now ' + ecEmail.trim().toLowerCase() + '.' })
+      setModal(null); setEcStep('view'); setEcEmail(''); setEcCode('')
+    } finally { setEcBusy(false) }
+  }
   return (
     <div className="anim-fade-up">
       <Card className="p-6 text-center mb-4">
@@ -556,6 +582,39 @@ export default function Profile() {
           ))}
         </div>
         <ModalActions><Btn className="w-full py-3.5" onClick={() => { setModal(null); toast({ kind: 'success', title: 'Preferences saved' }) }}>{t('save')}</Btn></ModalActions>
+      </Modal>
+      <Modal open={modal === 'email'} onClose={() => { setModal(null); setEcStep('view') }} title={t('p_email')}>
+        <ModalDesc>Your account email is used for sign-in, verification codes and receipts.</ModalDesc>
+        <div className="space-y-2.5">
+          <ModalRow>
+            <span className="flex items-center justify-between gap-3">
+              <span><span className="block font-bold text-sm">{user.email}</span><span className="text-xs text-slate-400">Current email address</span></span>
+              {user.emailVerified ? <Badge tone="green">✓ Verified</Badge> : <Badge tone="amber">Not verified</Badge>}
+            </span>
+          </ModalRow>
+          {ecStep === 'view' ? (
+            <>
+              <Input label="New email address" type="email" placeholder="you@email.com" value={ecEmail} onChange={e => setEcEmail(e.target.value)} />
+              <Btn className="w-full py-3" disabled={!ecEmail.trim() || ecBusy} onClick={sendEcCode}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Send verification code'}</Btn>
+            </>
+          ) : (
+            <>
+              <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3 text-center">
+                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 Code sent to {ecEmail.trim().toLowerCase()} — it expires in 2 minutes.</p>
+              </div>
+              <PinBoxes label="Enter the 6-digit code" length={6} showDigits value={ecCode} onChange={setEcCode} />
+              <Btn className="w-full py-3" disabled={ecCode.length !== 6 || ecBusy} onClick={confirmEc}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Confirm new email'}</Btn>
+              <button onClick={sendEcCode} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
+              <button onClick={() => setEcStep('view')} className="w-full text-center text-sm font-bold text-slate-500">← Different email</button>
+            </>
+          )}
+          <ModalRow><label className="flex items-center justify-between font-semibold text-sm">Transaction emails
+            <input type="checkbox" checked={emailPrefs.txEmails} onChange={e => void setTxEmails(e.target.checked)} className="w-5 h-5 accent-violet-600" /></label>
+            <span className="block text-xs text-slate-400 mt-1">Deposit, withdrawal, send/receive and loan updates by email.</span></ModalRow>
+          <ModalRow><label className="flex items-center justify-between font-semibold text-sm">Security alerts
+            <input type="checkbox" checked disabled className="w-5 h-5 accent-violet-600 opacity-50" /></label>
+            <span className="block text-xs text-slate-400 mt-1">Password changes, email changes and new sign-ins — always on, for your safety.</span></ModalRow>
+        </div>
       </Modal>
       <Modal open={modal === 'sessions'} onClose={() => setModal(null)} title={t('p_sessions')}>
         <ModalDesc>Devices currently signed in to your account. Signing a device out here ends its access right away — it will have to log in again.</ModalDesc>

@@ -97,11 +97,18 @@ interface Ctx {
   removeUserPayMethod: (id: string) => void
   requestPasswordOtp: (email: string) => { error: string | null; otp: string | null; waitSeconds: number }
   requestEmailOtp: (email: string) => Promise<{ error: string | null; emailed: boolean; waitSeconds: number }>
+  resetPasswordByPin: (email: string, pin: string, newPassword: string) => Promise<string | null>
+  requestRegOtp: (email: string) => Promise<{ error: string | null; emailed: boolean; waitSeconds: number; alreadyRegistered: boolean }>
+  confirmRegOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
+  emailPrefs: { txEmails: boolean }
+  setTxEmails: (v: boolean) => Promise<void>
+  requestEmailChange: (newEmail: string) => Promise<{ error: string | null; waitSeconds: number }>
+  confirmEmailChange: (code: string) => Promise<string | null>
   verifyEmailOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
   resetPasswordByGrant: (email: string, grant: string, newPassword: string) => Promise<string | null>
   verifyPasswordOtp: (email: string, otp: string) => string | null
   resetPasswordWithOtp: (email: string, otp: string, newPassword: string) => string | null
-  register: (p: { name: string; username: string; email: string; phone: string; password: string; pin: string; referralCode?: string; turnstileToken?: string }) => Promise<string | null>
+  register: (p: { name: string; username: string; email: string; phone: string; password: string; pin: string; referralCode?: string; turnstileToken?: string; verifyGrant?: string }) => Promise<string | null>
   walletOf: (userId: string) => DB['wallets'][number]
   addDeposit: (p: { method: string; amount: number; trxId: string; receipt?: string; methodId?: string; kind?: 'bank' | 'crypto'; verification?: 'manual' | 'auto' }) => Promise<string | null>
   decideDeposit: (id: string, ok: boolean) => Promise<void>
@@ -207,6 +214,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [locked, userId])
   const [, setQuickTick] = useState(0)
   const [adminErrors, setAdminErrors] = useState<Ctx['adminErrors']>([])
+  const [emailPrefs, setEmailPrefsState] = useState<{ txEmails: boolean }>({ txEmails: true })
   // Global submit state for money actions: while one runs, a full-screen
   // loading overlay covers the app (the user sees the tap worked and
   // cannot double-tap), and a second action call is refused outright.
@@ -486,6 +494,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.kyc) lu.kyc = state.profile.kyc
       if (state.profile.kycDocType) { lu.kycDocType = state.profile.kycDocType; lu.kycDocNumber = state.profile.kycDocNumber; lu.kycSubmittedAt = state.profile.kycSubmittedAt }
       if (state.profile.phone !== undefined) lu.phone = state.profile.phone
+      if (state.profile.email) lu.email = state.profile.email
+      if (state.profile.emailVerified !== undefined) lu.emailVerified = state.profile.emailVerified
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
@@ -587,6 +597,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const st = await apiGet('/v1/state')
       if (st?.state) mutate(d => applyStateInto(d, u.id, st.state))
+      if (st?.state?.emailPrefs) setEmailPrefsState(st.state.emailPrefs)
       const dir = await apiGet('/v1/directory')
       if (dir?.users) mutate(d => mergeDirectoryInto(d, dir.users))
       if ((st?.state?.profile?.role ?? u.role) === 'admin') {
@@ -921,6 +932,69 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     return null
   }
+  // PIN-method reset, server-backed: the Worker verifies the PIN (PBKDF2 +
+  // lockout) and sets the REAL Firebase password, so it works on any device.
+  // Returns 'account_not_on_server' verbatim so Auth can fall back to the
+  // local-only reset for accounts that never reached the server.
+  const resetPasswordByPin: Ctx['resetPasswordByPin'] = async (email, pin, newPassword) => {
+    try {
+      await publicPost('/v1/password/reset-by-pin', { email: email.trim().toLowerCase(), pin, newPassword })
+    } catch (e: any) {
+      if (e.message === 'not_configured') return 'Password reset is not fully set up yet. Please contact support.'
+      return e.message || 'Password reset failed.'
+    }
+    const em = email.trim().toLowerCase()
+    const u = dbRef.current.users.find(x => x.email === em)
+    if (u) {
+      recordSuccess(u.id)
+      mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.passwordHash = hashSecret(newPassword); delete du.resetOtpHash; delete du.resetOtpExpires })
+    }
+    return null
+  }
+  // Registration email verification (public OTP endpoints, same discipline
+  // as password reset: 2-minute code, resend lock, hourly caps).
+  const requestRegOtp: Ctx['requestRegOtp'] = async (email) => {
+    try {
+      const r = await publicPost('/v1/verify-email/request', { email: email.trim().toLowerCase() })
+      return { error: null, emailed: !!r.emailed, waitSeconds: Number(r.waitSeconds || 0), alreadyRegistered: !!r.alreadyRegistered }
+    } catch (e: any) {
+      if (e instanceof TypeError) return { error: null, emailed: false, waitSeconds: 0, alreadyRegistered: false }
+      return { error: e.message || 'Could not send the verification code.', emailed: false, waitSeconds: 0, alreadyRegistered: false }
+    }
+  }
+  const confirmRegOtp: Ctx['confirmRegOtp'] = async (email, code) => {
+    try {
+      const r = await publicPost('/v1/verify-email/confirm', { email: email.trim().toLowerCase(), code })
+      return { error: null, grant: String(r.grant || '') || null }
+    } catch (e: any) {
+      return { error: e.message || 'Verification failed.', grant: null }
+    }
+  }
+  // Email notification preferences (server-side, synced across devices).
+  const setTxEmails: Ctx['setTxEmails'] = async (v) => {
+    setEmailPrefsState({ txEmails: v })
+    try { await apiPost('/v1/email-prefs', { txEmails: v }) } catch { setEmailPrefsState({ txEmails: !v }); toast({ kind: 'error', title: 'Could not save the setting. Try again.' }) }
+  }
+  // Change account email: OTP to the NEW address proves ownership; the
+  // Worker then updates Firebase + D1 and alerts the old address.
+  const requestEmailChange: Ctx['requestEmailChange'] = async (newEmail) => {
+    try {
+      const r = await apiPost('/v1/email-change/request', { newEmail: newEmail.trim().toLowerCase() })
+      return { error: null, waitSeconds: Number(r.waitSeconds || 0) }
+    } catch (e: any) {
+      return { error: e.message || 'Could not send the verification code.', waitSeconds: 0 }
+    }
+  }
+  const confirmEmailChange: Ctx['confirmEmailChange'] = async (code) => {
+    try {
+      const r = await apiPost('/v1/email-change/confirm', { code })
+      if (userId && r.email) mutate(d => { const du = d.users.find(x => x.id === userId); if (du) { du.email = r.email; du.emailVerified = true } })
+      return null
+    } catch (e: any) {
+      if (e.message === 'not_configured') return 'Email change is not fully set up yet. Please contact support.'
+      return e.message || 'Email change failed.'
+    }
+  }
   // The user's OWN linked payment methods (their bank account / crypto wallet),
   // managed from Profile → Payment methods. Server-backed: every change is
   // saved to D1 via the API and comes back in /v1/state, so the list syncs
@@ -967,7 +1041,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const cred = await createUserWithEmailAndPassword(firebaseAuth, p.email, p.password)
       newFbUid = cred.user.uid
       const token = await cred.user.getIdToken()
-      void apiBootstrap(token, { username: p.username, fullName: p.name, pinHash: hashSecret(p.pin), phone: p.phone, referralCode: p.referralCode, deviceLabel: deviceLabel(), turnstileToken: p.turnstileToken }).then(saveSessionId)
+      void apiBootstrap(token, { username: p.username, fullName: p.name, pinHash: hashSecret(p.pin), phone: p.phone, referralCode: p.referralCode, deviceLabel: deviceLabel(), turnstileToken: p.turnstileToken, verifyGrant: p.verifyGrant }).then(saveSessionId)
     } catch (e: any) {
       const code = e?.code || ''
       if (code === 'auth/email-already-in-use') return 'An account with this email already exists.'
@@ -1405,6 +1479,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // for a fresh sign-in on long-lived sessions; the next sign-in re-syncs
     // the local copy from Firebase, so a miss here cannot lock anyone out).
     if (firebaseAuth.currentUser) void fbUpdatePassword(firebaseAuth.currentUser, newPw).catch(() => {})
+    void apiPost('/v1/security/password-changed', {}).catch(() => {})
     return null
   }
   const changePin: Ctx['changePin'] = async (oldPin, newPin) => {
@@ -1621,7 +1696,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, setUserLoanLimit,
-    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
+    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, requestEmailChange, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }
   return (
     <AppCtx.Provider value={value}>

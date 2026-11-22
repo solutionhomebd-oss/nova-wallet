@@ -12,7 +12,7 @@ import { Logo } from '../components/Layout'
 const TURNSTILE_SITE_KEY = ''
 
 export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landing' | 'login' | 'register' }) {
-  const { login, register, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, toast, t } = useApp()
+  const { login, register, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, toast, t } = useApp()
   const navigate = useNavigate()
   const refCode = new URLSearchParams(window.location.search).get('ref') ?? ''
   const [mode] = useState<'landing' | 'login' | 'register'>(refCode ? 'register' : initialMode)
@@ -27,6 +27,9 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
   const [fpMode, setFpMode] = useState<'local' | 'server'>('local')
   const [fpGrant, setFpGrant] = useState<string | null>(null)
   const [fpBusy, setFpBusy] = useState(false)
+  const [regStep, setRegStep] = useState<'form' | 'otp'>('form')
+  const [regOtp, setRegOtp] = useState('')
+  const [regBusy, setRegBusy] = useState(false)
   const [fpOtpVerified, setFpOtpVerified] = useState(false)
   const [err, setErr] = useState('')
   const [tsToken, setTsToken] = useState('')
@@ -53,11 +56,20 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
     if (e) { setErr(e); return }
     afterLogin(id)
   }
-  const doReset = () => {
-    const e = resetPassword(fp.email, fp.pin, fp.password)
-    if (e) { setErr(e); return }
-    toast({ kind: 'success', title: 'Password reset', body: 'Log in with your new password.' })
-    setLoginId(fp.email); setLoginPw(''); setErr(''); setStep('auth')
+  const doReset = async () => {
+    if (fpBusy) return
+    setFpBusy(true)
+    try {
+      const e = await resetPasswordByPin(fp.email, fp.pin, fp.password)
+      if (e === 'account_not_on_server') {
+        // Account never reached the server (pre-backend local account) —
+        // the original local reset is the only route for it.
+        const le = resetPassword(fp.email, fp.pin, fp.password)
+        if (le) { setErr(le); return }
+      } else if (e) { setErr(e); return }
+      toast({ kind: 'success', title: 'Password reset', body: 'Log in with your new password.' })
+      setLoginId(fp.email); setLoginPw(''); setErr(''); setStep('auth')
+    } finally { setFpBusy(false) }
   }
   const sendFpCode = async () => {
     if (fpBusy) return
@@ -114,13 +126,58 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
     toast({ kind: 'success', title: 'Password reset', body: 'Log in with your new password.' })
     setLoginId(fp.email); setLoginPw(''); setErr(''); setStep('auth'); setFpOtp(''); setFpOtpDemo(null); setFpSent(false); setFpOtpVerified(false)
   }
-  const doRegister = async () => {
+  const doRegister = async (verifyGrant?: string) => {
     if (form.password.length < 6) return setErr('Password must be at least 6 characters.')
     if (!/^\d{4}$/.test(form.pin)) return setErr('Transaction PIN must be exactly 4 digits.')
-    const e = await register({ ...form, email: form.email.trim().toLowerCase(), username: form.username.trim().toLowerCase(), referralCode: form.referralCode.trim() || undefined, turnstileToken: tsToken || undefined })
+    const e = await register({ ...form, email: form.email.trim().toLowerCase(), username: form.username.trim().toLowerCase(), referralCode: form.referralCode.trim() || undefined, turnstileToken: tsToken || undefined, verifyGrant })
     if (e) return setErr(e)
     toast({ kind: 'success', title: 'Account created', body: 'Welcome to NovaWallet.' })
     navigate('/')
+  }
+  // Registration starts with email verification: a 6-digit code proves the
+  // address is real before the account exists. When email delivery is off
+  // (demo mode), registration proceeds directly, exactly as before.
+  const startRegister = async () => {
+    if (regBusy) return
+    if (form.password.length < 6) return setErr('Password must be at least 6 characters.')
+    if (!/^\d{4}$/.test(form.pin)) return setErr('Transaction PIN must be exactly 4 digits.')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return setErr('Enter a valid email address.')
+    setRegBusy(true)
+    try {
+      const r = await requestRegOtp(form.email)
+      if (r.error) { setErr(r.error); return }
+      if (r.alreadyRegistered) { setErr('An account with this email already exists. Please log in.'); return }
+      if (!r.emailed) { await doRegister(); return }
+      if (r.waitSeconds > 0) {
+        const m = Math.floor(r.waitSeconds / 60), ss = String(r.waitSeconds % 60).padStart(2, '0')
+        toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${form.email.trim().toLowerCase()}. It stays valid for ${m}:${ss} more — enter it below.` })
+      }
+      setErr(''); setRegOtp(''); setRegStep('otp')
+    } finally { setRegBusy(false) }
+  }
+  const verifyRegAndRegister = async () => {
+    if (regBusy) return
+    setRegBusy(true)
+    try {
+      const r = await confirmRegOtp(form.email, regOtp)
+      if (r.error || !r.grant) { setErr(r.error || 'Verification failed.'); return }
+      setErr('')
+      await doRegister(r.grant)
+    } finally { setRegBusy(false) }
+  }
+  const resendRegCode = async () => {
+    if (regBusy) return
+    setRegBusy(true)
+    try {
+      const r = await requestRegOtp(form.email)
+      if (r.error) { setErr(r.error); return }
+      if (r.waitSeconds > 0) {
+        const m = Math.floor(r.waitSeconds / 60), ss = String(r.waitSeconds % 60).padStart(2, '0')
+        toast({ kind: 'info', title: 'Please wait', body: `Your current code stays valid for ${m}:${ss} more — enter it below, or wait for it to expire to request a new one.` })
+        return
+      }
+      setRegOtp(''); toast({ kind: 'success', title: 'New code sent', body: 'Check your inbox for the fresh 6-digit code.' })
+    } finally { setRegBusy(false) }
   }
   const features = [
     { icon: ArrowDownToLine, t: t('act_add'), d: t('feat_add_d') },
@@ -251,7 +308,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
         <div className="rounded-[25px] bg-white/95 dark:bg-slate-900/95 backdrop-blur p-6">
           {step === 'auth' && <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 mb-5">
             {(['login', 'register'] as const).map(m => (
-              <button key={m} onClick={() => { navigate(m === 'login' ? '/login' : '/register'); setErr('') }} className={`py-2 rounded-xl text-sm font-bold ${mode === m ? 'bg-white dark:bg-slate-900 shadow text-violet-600' : 'text-slate-500'}`}>{m === 'login' ? t('login') : t('register')}</button>
+              <button key={m} onClick={() => { navigate(m === 'login' ? '/login' : '/register'); setErr(''); setRegStep('form') }} className={`py-2 rounded-xl text-sm font-bold ${mode === m ? 'bg-white dark:bg-slate-900 shadow text-violet-600' : 'text-slate-500'}`}>{m === 'login' ? t('login') : t('register')}</button>
             ))}
           </div>}
           {err && <div className="mb-4 rounded-2xl bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 px-4 py-3 text-sm font-semibold">{err}</div>}
@@ -271,7 +328,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
                   <Input label="Email" type="email" placeholder="you@email.com" value={fp.email} onChange={e => setFp(f => ({ ...f, email: e.target.value }))} />
                   <Input label={t('pin_4digit')} type="password" inputMode="numeric" maxLength={4} placeholder="••••" value={fp.pin} onChange={e => setFp(f => ({ ...f, pin: e.target.value }))} />
                   <Input label="New password (min 6 characters)" type="password" placeholder="••••••••" value={fp.password} onChange={e => setFp(f => ({ ...f, password: e.target.value }))} onKeyDown={e => e.key === 'Enter' && doReset()} />
-                  <Btn className="w-full py-3.5" onClick={doReset}>Reset password</Btn>
+                  <Btn className="w-full py-3.5" disabled={fpBusy} onClick={doReset}>{fpBusy ? <Loader2 size={17} className="animate-spin" /> : 'Reset password'}</Btn>
                 </>
               ) : !fpSent ? (
                 <>
@@ -306,6 +363,17 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
               <Btn className="w-full py-3.5" onClick={() => doLogin()}>{t('login')}</Btn>
               <button onClick={() => { setErr(''); setStep('forgot') }} className="w-full text-center text-sm font-bold text-violet-600">Forgot password?</button>
             </div>
+          ) : regStep === 'otp' ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3.5 text-center">
+                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{form.email.trim().toLowerCase()}</b>. It expires in 2 minutes.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">Don't see it in your inbox? Please check your <b>spam or junk folder</b> — sometimes it lands there.</p>
+              </div>
+              <PinBoxes label="Enter the 6-digit code" length={6} showDigits value={regOtp} onChange={setRegOtp} />
+              <Btn className="w-full py-3.5" disabled={regOtp.length !== 6 || regBusy} onClick={verifyRegAndRegister}>{regBusy ? <Loader2 size={17} className="animate-spin" /> : 'Verify & create account'}</Btn>
+              <button onClick={resendRegCode} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
+              <button onClick={() => { setRegStep('form'); setErr('') }} className="w-full text-center text-sm font-bold text-slate-500">← Use a different email</button>
+            </div>
           ) : (
             <div className="space-y-4">
               <Input label={t('full_name')} placeholder="Your name" value={form.name} onChange={set('name')} />
@@ -316,7 +384,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
               <Input label={t('pin_4digit')} type="password" inputMode="numeric" maxLength={4} placeholder="••••" value={form.pin} onChange={set('pin')} />
               <Input label={t('referral_code_opt')} placeholder="NOVA-XXXXX" value={form.referralCode} onChange={set('referralCode')} />
               {TURNSTILE_SITE_KEY && <div ref={tsRef} className="flex justify-center" />}
-              <Btn className="w-full py-3.5" onClick={doRegister}>{t('create_account')}</Btn>
+              <Btn className="w-full py-3.5" disabled={regBusy} onClick={startRegister}>{regBusy ? <Loader2 size={17} className="animate-spin" /> : t('create_account')}</Btn>
               <p className="text-[11px] text-center text-slate-400 leading-relaxed">{t('join_pre')} <Link to="/terms" className="font-bold text-violet-600 dark:text-violet-400 underline underline-offset-2">{t('join_terms_word')}</Link> {t('join_and')} <Link to="/privacy" className="font-bold text-violet-600 dark:text-violet-400 underline underline-offset-2">{t('join_privacy_word')}</Link>{t('join_post')}</p>
             </div>
           )}

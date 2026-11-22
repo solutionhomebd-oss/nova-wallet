@@ -2177,7 +2177,7 @@ const OTP_ERR = {
   none: "No code was requested for this email yet. Tap \u201CSend code\u201D first.",
   expired: "That code has expired. Please request a new one.",
   attempts: "Too many incorrect attempts. Please request a new code.",
-  wrong: "Incorrect code \u2014 please check and try again.",
+  wrong: "Incorrect code. Make sure you are using the newest code we emailed you \u2014 older codes stop working as soon as a new one is sent.",
 };
 const OTP_PURPOSE = {
   reset: { heading: "Password reset verification", intro: "Use the verification code below to reset your NovaWallet password:", ignore: "If you didn't request a password reset, please ignore this email. Your password will stay unchanged." },
@@ -2185,9 +2185,15 @@ const OTP_PURPOSE = {
   change: { heading: "Confirm your new email address", intro: "Use the verification code below to confirm this email address for your NovaWallet account:", ignore: "If you didn't request an email change, please ignore this email and contact support." },
   changecurrent: { heading: "Verify it's you", intro: "Use the verification code below to confirm it's you before changing your NovaWallet account email:", ignore: "If you didn't request an email change, please ignore this email — your email will stay unchanged." },
 };
+function dhakaTimeLabel() {
+  const d = new Date(Date.now() + 6 * 3600000);
+  let h = d.getUTCHours(); const m = String(d.getUTCMinutes()).padStart(2, "0");
+  const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+  return h + ":" + m + " " + ap;
+}
 function otpEmailText(code, purpose = "reset") {
   const p = OTP_PURPOSE[purpose] || OTP_PURPOSE.reset;
-  return "Hello,\n\n" + p.intro + "\n\n" + code + "\n\nThis code expires in 2 minutes. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.\n\n" + p.ignore + "\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
+  return "Hello,\n\n" + p.intro + "\n\n" + code + "\n\nThis code expires in 2 minutes. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.\n\n" + "Requested at " + dhakaTimeLabel() + " (Dhaka time). If you have more than one code email from us, use the newest one \u2014 older codes stop working when a new code is sent.\n\n" + p.ignore + "\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
 }
 function emailShell(heading, innerHtml) {
   return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>" +
@@ -2214,6 +2220,7 @@ function otpEmailHtml(code, purpose = "reset") {
     para("Hello,") + para(p.intro) +
     "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:18px 12px;text-align:center;font-size:34px;font-weight:bold;letter-spacing:10px;color:#4c1d95;margin-top:20px;\">" + code + "</div>" +
     small("This code expires in <b>2 minutes</b>. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.") +
+    small("Requested at <b>" + dhakaTimeLabel() + "</b> (Dhaka time). If you have more than one code email from us, use the <b>newest one</b> \u2014 older codes stop working when a new code is sent.") +
     small(p.ignore));
 }
 // A generic branded email (transaction notices, security alerts, …).
@@ -2303,9 +2310,9 @@ async function handleEmailChangeStart(request, env, auth) {
   if (gate > 0) return json(request, { ok: true, waitSeconds: gate });
   const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
   const codeHash = await sha256Hex(me.email + ":" + code);
-  await db.prepare("INSERT INTO email_changes (user_id, new_email, code_hash, expires_at, attempts, last_sent_at, stage, stage_expires) VALUES (?, NULL, ?, ?, 0, ?, 1, NULL) ON CONFLICT(user_id) DO UPDATE SET new_email = NULL, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at, stage = 1, stage_expires = NULL")
-    .bind(auth.uid, codeHash, now + 2 * 60000, now).run();
-  const r = await sendAndLog(env, db, { userId: auth.uid, to: me.email, kind: "verify", subject: "Verify it's you — NovaWallet email change", text: otpEmailText(code, "changecurrent"), html: otpEmailHtml(code, "changecurrent"), ip: clientIp(request) });
+  await db.prepare("INSERT INTO email_changes (user_id, new_email, code_hash, expires_at, attempts, last_sent_at, stage, stage_expires, prev_code_hash, prev_expires_at) VALUES (?, NULL, ?, ?, 0, ?, 1, NULL, ?, ?) ON CONFLICT(user_id) DO UPDATE SET new_email = NULL, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at, stage = 1, stage_expires = NULL, prev_code_hash = excluded.prev_code_hash, prev_expires_at = excluded.prev_expires_at")
+    .bind(auth.uid, codeHash, now + 2 * 60000, now, prev?.code_hash || null, prev?.code_hash ? now + 10 * 60000 : null).run();
+  const r = await sendAndLog(env, db, { userId: auth.uid, to: me.email, kind: "verify", subject: "Verify it's you — NovaWallet email change (" + dhakaTimeLabel() + ")", text: otpEmailText(code, "changecurrent"), html: otpEmailHtml(code, "changecurrent"), ip: clientIp(request) });
   if (!r.sent) {
     try { await db.prepare("DELETE FROM email_changes WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
     return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
@@ -2316,18 +2323,19 @@ async function handleEmailChangeVerifyCurrent(request, env, auth, body) {
   const db = env.DB;
   const me = await getUserRow(db, auth.uid);
   if (!me?.email) return json(request, { error: "Account not found." }, 404);
-  const code = String(body.code || "").trim();
+  const code = String(body.code || "").replace(/\D/g, "");
   const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
   if (!row || Number(row.stage) !== 1 || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
   if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
   if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
   const h = await sha256Hex(me.email + ":" + code);
-  if (h !== row.code_hash) {
+  const okCode = h === row.code_hash || (!!row.prev_code_hash && Date.now() <= Number(row.prev_expires_at || 0) && h === row.prev_code_hash);
+  if (!okCode) {
     await db.prepare("UPDATE email_changes SET attempts = attempts + 1 WHERE user_id = ?").bind(auth.uid).run();
     return json(request, { error: OTP_ERR.wrong }, 400);
   }
   // Stage 1 proven — a 10-minute window to enter and confirm the new email.
-  await db.prepare("UPDATE email_changes SET code_hash = NULL, stage = 2, stage_expires = ? WHERE user_id = ?").bind(Date.now() + 10 * 60000, auth.uid).run();
+  await db.prepare("UPDATE email_changes SET code_hash = NULL, prev_code_hash = NULL, prev_expires_at = NULL, stage = 2, stage_expires = ? WHERE user_id = ?").bind(Date.now() + 10 * 60000, auth.uid).run();
   return json(request, { ok: true });
 }
 async function handleEmailChangeRequestNew(request, env, auth, body) {
@@ -2351,9 +2359,9 @@ async function handleEmailChangeRequestNew(request, env, auth, body) {
   if (gate > 0) return json(request, { ok: true, waitSeconds: gate });
   const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
   const codeHash = await sha256Hex(newEmail + ":" + code);
-  await db.prepare("UPDATE email_changes SET new_email = ?, code_hash = ?, expires_at = ?, attempts = 0, last_sent_at = ? WHERE user_id = ?")
-    .bind(newEmail, codeHash, now + 2 * 60000, now, auth.uid).run();
-  const r = await sendAndLog(env, db, { userId: auth.uid, to: newEmail, kind: "verify", subject: "Confirm your new NovaWallet email address", text: otpEmailText(code, "change"), html: otpEmailHtml(code, "change"), ip: clientIp(request) });
+  await db.prepare("UPDATE email_changes SET new_email = ?, code_hash = ?, expires_at = ?, attempts = 0, last_sent_at = ?, prev_code_hash = ?, prev_expires_at = ? WHERE user_id = ?")
+    .bind(newEmail, codeHash, now + 2 * 60000, now, row.code_hash || null, row.code_hash ? now + 10 * 60000 : null, auth.uid).run();
+  const r = await sendAndLog(env, db, { userId: auth.uid, to: newEmail, kind: "verify", subject: "Confirm your new NovaWallet email address (" + dhakaTimeLabel() + ")", text: otpEmailText(code, "change"), html: otpEmailHtml(code, "change"), ip: clientIp(request) });
   if (!r.sent) {
     try { await db.prepare("UPDATE email_changes SET code_hash = NULL WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
     return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
@@ -2362,13 +2370,14 @@ async function handleEmailChangeRequestNew(request, env, auth, body) {
 }
 async function handleEmailChangeConfirm(request, env, auth, body) {
   const db = env.DB;
-  const code = String(body.code || "").trim();
+  const code = String(body.code || "").replace(/\D/g, "");
   const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
   if (!row || Number(row.stage) !== 2 || !row.new_email || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
   if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
   if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
   const h = await sha256Hex(row.new_email + ":" + code);
-  if (h !== row.code_hash) {
+  const okCode = h === row.code_hash || (!!row.prev_code_hash && Date.now() <= Number(row.prev_expires_at || 0) && h === row.prev_code_hash);
+  if (!okCode) {
     await db.prepare("UPDATE email_changes SET attempts = attempts + 1 WHERE user_id = ?").bind(auth.uid).run();
     return json(request, { error: OTP_ERR.wrong }, 400);
   }
@@ -2450,12 +2459,12 @@ async function handlePasswordRequestOtp(request, env, body) {
     }
     const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
     const codeHash = await sha256Hex(email + ":" + code);
-    await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
-      .bind(email, user.id, codeHash, now + 2 * 60000, now).run();
+    await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at, prev_code_hash, prev_expires_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at, prev_code_hash = excluded.prev_code_hash, prev_expires_at = excluded.prev_expires_at")
+      .bind(email, user.id, codeHash, now + 2 * 60000, now, prev?.code_hash || null, prev?.code_hash ? now + 10 * 60000 : null).run();
     if (smtpReady) {
       const r = await sendAndLog(env, db, {
         userId: user.id, to: email, kind: "otp",
-        subject: "Your NovaWallet verification code",
+        subject: "Your NovaWallet verification code (" + dhakaTimeLabel() + ")",
         text: otpEmailText(code, "reset"),
         html: otpEmailHtml(code, "reset"),
         ip: clientIp(request),
@@ -2518,12 +2527,12 @@ async function handleVerifyEmailRequest(request, env, body) {
   }
   const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
   const codeHash = await sha256Hex(email + ":" + code);
-  await db.prepare("INSERT INTO email_verifications (email, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
-    .bind(email, codeHash, now + 2 * 60000, now).run();
+  await db.prepare("INSERT INTO email_verifications (email, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at, prev_code_hash, prev_expires_at) VALUES (?, ?, ?, 0, NULL, NULL, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at, prev_code_hash = excluded.prev_code_hash, prev_expires_at = excluded.prev_expires_at")
+    .bind(email, codeHash, now + 2 * 60000, now, prev?.code_hash || null, prev?.code_hash ? now + 10 * 60000 : null).run();
   if (smtpReady) {
     const r = await sendAndLog(env, db, {
       userId: null, to: email, kind: "verify",
-      subject: "Verify your NovaWallet email address",
+      subject: "Verify your NovaWallet email address (" + dhakaTimeLabel() + ")",
       text: otpEmailText(code, "verify"),
       html: otpEmailHtml(code, "verify"),
       ip: clientIp(request),
@@ -2538,19 +2547,20 @@ async function handleVerifyEmailRequest(request, env, body) {
 async function handleVerifyEmailConfirm(request, env, body) {
   const db = env.DB;
   const email = String(body.email || "").trim().toLowerCase();
-  const code = String(body.code || "").trim();
+  const code = String(body.code || "").replace(/\D/g, "");
   const row = await db.prepare("SELECT * FROM email_verifications WHERE email = ?").bind(email).first();
   if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
   if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
   if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
   const h = await sha256Hex(email + ":" + code);
-  if (h !== row.code_hash) {
+  const okCode = h === row.code_hash || (!!row.prev_code_hash && Date.now() <= Number(row.prev_expires_at || 0) && h === row.prev_code_hash);
+  if (!okCode) {
     await db.prepare("UPDATE email_verifications SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
     return json(request, { error: OTP_ERR.wrong }, 400);
   }
   const grantBytes = crypto.getRandomValues(new Uint8Array(32));
   const grant = [...grantBytes].map(b => b.toString(16).padStart(2, "0")).join("");
-  await db.prepare("UPDATE email_verifications SET code_hash = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
+  await db.prepare("UPDATE email_verifications SET code_hash = NULL, prev_code_hash = NULL, prev_expires_at = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
     .bind(await sha256Hex(grant), Date.now() + 30 * 60000, email).run();
   return json(request, { ok: true, grant });
 }
@@ -2558,19 +2568,20 @@ async function handleVerifyEmailConfirm(request, env, body) {
 async function handlePasswordVerifyOtp(request, env, body) {
   const db = env.DB;
   const email = String(body.email || "").trim().toLowerCase();
-  const code = String(body.code || "").trim();
+  const code = String(body.code || "").replace(/\D/g, "");
   const row = await db.prepare("SELECT * FROM password_otps WHERE email = ?").bind(email).first();
   if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
   if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
   if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
   const h = await sha256Hex(email + ":" + code);
-  if (h !== row.code_hash) {
+  const okCode = h === row.code_hash || (!!row.prev_code_hash && Date.now() <= Number(row.prev_expires_at || 0) && h === row.prev_code_hash);
+  if (!okCode) {
     await db.prepare("UPDATE password_otps SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
     return json(request, { error: OTP_ERR.wrong }, 400);
   }
   const grantBytes = crypto.getRandomValues(new Uint8Array(32));
   const grant = [...grantBytes].map(b => b.toString(16).padStart(2, "0")).join("");
-  await db.prepare("UPDATE password_otps SET code_hash = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
+  await db.prepare("UPDATE password_otps SET code_hash = NULL, prev_code_hash = NULL, prev_expires_at = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
     .bind(await sha256Hex(grant), Date.now() + 10 * 60000, email).run();
   return json(request, { ok: true, grant });
 }

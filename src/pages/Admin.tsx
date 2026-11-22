@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Loader2, Mail } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
@@ -38,7 +38,7 @@ const SCOPE_TABS: Record<string, string[]> = {
 }
 
 export default function Admin() {
-  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, setUserStatus, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
+  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
   const usdt = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const byDateDesc = <T extends { createdAt: string }>(arr: T[]): T[] => [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   useMarket(30_000)
@@ -354,25 +354,15 @@ export default function Admin() {
           <div className="anim-fade-up">
             <input value={userQ} onChange={e => setUserQ(e.target.value)} placeholder="Search users by name, email, username, ID…" className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800/70 px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-violet-500" />
             <div className="space-y-2">
-              {db.users.filter(u => (u.name + u.email + u.username + u.id).toLowerCase().includes(userQ.toLowerCase())).map(u => {
-                const w = db.wallets.find(x => x.userId === u.id)
-                return (
+              {db.users.filter(u => (u.name + u.email + u.username + u.id).toLowerCase().includes(userQ.toLowerCase())).map(u => (
                   <Card key={u.id} className="p-4">
-                    <div className="flex flex-wrap items-center gap-3 cursor-pointer" onClick={() => openUser(u)} title="Click to manage this account">
+                    <div className="flex items-center gap-3 cursor-pointer" onClick={() => openUser(u)} title="Open user details">
                       <Avatar name={u.name} photo={u.photo} />
-                      <div className="flex-1 min-w-[170px]"><p className="font-bold">{u.name} {u.role === 'admin' && <Badge tone="amber">admin</Badge>}</p><p className="text-xs text-slate-400">@{u.username} · {u.email} · {u.phone} · {u.id}</p><p className="text-xs text-slate-400">Balance {usdt((w?.available ?? 0) + (w?.locked ?? 0))} · Joined {fmtDateTime(u.createdAt)} · {db.txs.filter(t => t.userId === u.id).length} txns</p></div>
-                      <span onClick={e => { e.stopPropagation(); setKycFocus(u.id); setUsersOpen(true); setTab('kyc') }} className="cursor-pointer" title="Open in KYC Verification"><Badge tone={statusTone(u.kyc)}>{u.kyc === 'verified' ? '✅ Verified' : u.kyc === 'pending' ? '⏳ KYC pending' : 'KYC unverified'}</Badge></span><Badge tone="violet">Level {u.level}</Badge><Badge tone={u.status === 'active' ? 'green' : 'red'}>{u.status}</Badge>
+                      <div className="flex-1 min-w-0"><p className="font-bold truncate">{u.name}</p><p className="text-xs text-slate-400 truncate">{u.email}</p></div>
+                      <Badge tone={u.kyc === 'verified' ? 'green' : 'amber'}>{u.kyc === 'verified' ? '✅ Verified' : 'Unverified'}</Badge>
                     </div>
-                    {u.role === 'user' && (
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {u.status !== 'frozen' ? <Btn variant="outline" className="!py-1.5 !text-xs" onClick={() => setUserStatus(u.id, 'frozen')}>Freeze wallet</Btn> : <Btn variant="outline" className="!py-1.5 !text-xs" onClick={() => setUserStatus(u.id, 'active')}>Unfreeze</Btn>}
-                        {u.status !== 'suspended' ? <Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => setUserStatus(u.id, 'suspended')}>Suspend</Btn> : <Btn variant="success" className="!py-1.5 !text-xs" onClick={() => setUserStatus(u.id, 'active')}>Activate</Btn>}
-                        <Btn variant="ghost" className="!py-1.5 !text-xs" onClick={() => openUser(u)}>Manage account</Btn>
-                      </div>
-                    )}
                   </Card>
-                )
-              })}
+              ))}
             </div>
           </div>
         )}
@@ -954,25 +944,50 @@ function SupportChat() {
 // User details as a full PAGE (formerly the Manage modal): the identity
 // card stays on top and every section lives behind its own menu entry,
 // the same pattern as the full-page support chat.
-const USER_SECTIONS = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'adjust', label: 'Adjust balance', icon: Wallet },
-  { id: 'trade', label: 'Crypto trade', icon: ArrowLeftRight },
-  { id: 'locked', label: 'Locked holdings', icon: Lock },
-  { id: 'controls', label: 'Account controls', icon: SettingsIcon },
-  { id: 'pin', label: 'PIN recovery', icon: ShieldCheck },
-  { id: 'statement', label: 'Statement', icon: ScrollText },
+const USER_SECTION_GROUPS = [
+  { label: 'Money', items: [
+    { id: 'adjust', label: 'Adjust balance', icon: Wallet },
+    { id: 'trade', label: 'Crypto trade', icon: ArrowLeftRight },
+    { id: 'locked', label: 'Locked holdings', icon: Lock },
+    { id: 'money', label: 'Money history', icon: HandCoins },
+    { id: 'statement', label: 'Statement', icon: ScrollText },
+  ] },
+  { label: 'Account', items: [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'controls', label: 'Account controls', icon: SettingsIcon },
+    { id: 'pin', label: 'PIN recovery', icon: ShieldCheck },
+    { id: 'sessions', label: 'Sessions & devices', icon: Smartphone },
+    { id: 'risk', label: 'Risk signals', icon: AlertTriangle },
+  ] },
+  { label: 'Communication', items: [
+    { id: 'tickets', label: 'Support tickets', icon: MessageCircle },
+    { id: 'emails', label: 'Email history', icon: Mail },
+    { id: 'message', label: 'Send message', icon: Send },
+    { id: 'notes', label: 'Notes & tags', icon: Tag },
+  ] },
+  { label: 'More', items: [
+    { id: 'referrals', label: 'Referrals', icon: Gift },
+    { id: 'activity', label: 'Activity log', icon: History },
+  ] },
 ] as const
 
 export function AdminUserPage() {
   const { userId } = useParams()
   const navigate = useNavigate()
-  const { user, db, decideUpgrade, setUserLevel, setUserStatus, adjustBalance, adminResetPin, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked, setAdminScope, setAdminRole, txUnhold, toast } = useApp()
+  const { user, db, decideUpgrade, setUserLevel, setUserStatus, adjustBalance, adminResetPin, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked, setAdminScope, setAdminRole, txUnhold, decideDeposit, decideWithdraw, decideLoan, toast } = useApp()
   const usdt = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const byDateDesc = <T extends { createdAt: string }>(arr: T[]): T[] => [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   const { coins } = useMarket(30_000)
   const priceOfA = (sym: string) => sym === 'USDT' ? 1 : coins.find(c => c.symbol === sym)?.priceUsd ?? 0
   const [section, setSection] = useState<string>('overview')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [extras, setExtras] = useState<any>(null)
+  const [notesText, setNotesText] = useState(''); const [tagsSel, setTagsSel] = useState<string[]>([]); const [notesBusy, setNotesBusy] = useState(false)
+  const [msgTitle, setMsgTitle] = useState(''); const [msgBody, setMsgBody] = useState(''); const [msgEmail, setMsgEmail] = useState(false); const [msgBusy, setMsgBusy] = useState(false)
+  const suidOf = (rec: any) => rec?.fbUid ?? rec?.id ?? userId
+  const loadExtras = () => { const rec = dbRefUsers(); apiGet('/v1/admin/user-extras?userId=' + suidOf(rec)).then(r => { if (r?.extras) { setExtras(r.extras); setNotesText(r.extras.notes ?? ''); setTagsSel(r.extras.tags ?? []) } }).catch(() => {}) }
+  const dbRefUsers = () => db.users.find(x => x.id === userId)
+  useEffect(() => { loadExtras() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
   const [mAdjAmt, setMAdjAmt] = useState(''); const [mLoanLimit, setMLoanLimit] = useState('')
   const [mAdjDir, setMAdjDir] = useState<'add' | 'deduct'>('add'); const [mAdjTitle, setMAdjTitle] = useState('Charge'); const [mAdjNote, setMAdjNote] = useState('')
   const [mSym, setMSym] = useState('BTC'); const [mSide, setMSide] = useState<'buy' | 'sell'>('buy'); const [mTradeAmt, setMTradeAmt] = useState('')
@@ -1016,6 +1031,7 @@ export function AdminUserPage() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <header className="sticky top-0 z-30 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-800">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center gap-3">
+          <button onClick={() => setDrawerOpen(true)} aria-label="Open sections menu" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><Menu size={18} /></button>
           <button onClick={() => navigate('/admin?tab=users')} aria-label="Back to Users" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><ArrowLeft size={18} /></button>
           <h1 className="font-extrabold text-lg truncate">User details</h1>
           <Link to="/" className="ml-auto hidden sm:inline-flex items-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white">User app</Link>
@@ -1042,16 +1058,30 @@ export function AdminUserPage() {
                   <p className="text-[11px] font-semibold text-white/60 text-right shrink-0">Joined<br /><span className="text-white/85">{fmtDateTime(u.createdAt)}</span></p>
                 </div>
               </div>
-        <div className="lg:flex lg:gap-5 lg:items-start">
-          <nav className="lg:w-56 lg:shrink-0 lg:sticky lg:top-24 mb-4 lg:mb-0">
-            <div className="flex lg:flex-col gap-1.5 overflow-x-auto pb-1 lg:pb-0 -mx-4 px-4 lg:mx-0 lg:px-0">
-              {USER_SECTIONS.map(sec => (
-                <button key={sec.id} onClick={() => setSection(sec.id)} className={'flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl text-sm font-bold whitespace-nowrap transition active:scale-[0.98] ' + (section === sec.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300')}>
-                  <sec.icon size={16} /> {sec.label}
-                </button>
+        {drawerOpen && (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+            <div className="absolute left-0 top-0 bottom-0 w-72 max-w-[85vw] bg-white dark:bg-slate-900 shadow-2xl overflow-y-auto p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-extrabold">Sections</p>
+                <button onClick={() => setDrawerOpen(false)} aria-label="Close menu" className="p-2 rounded-full bg-slate-100 dark:bg-slate-800"><X size={16} /></button>
+              </div>
+              {USER_SECTION_GROUPS.map(g => (
+                <div key={g.label} className="mt-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 px-2 mb-1.5">{g.label}</p>
+                  <div className="space-y-1">
+                    {g.items.map(sec => (
+                      <button key={sec.id} onClick={() => { setSection(sec.id); setDrawerOpen(false) }} className={'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-bold text-left transition active:scale-[0.98] ' + (section === sec.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300')}>
+                        <sec.icon size={16} /> {sec.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-          </nav>
+          </div>
+        )}
+        <div>
           <div className="flex-1 min-w-0 space-y-4">
             {section === 'overview' && (<>
 {/* Balance cards */}
@@ -1261,7 +1291,10 @@ export function AdminUserPage() {
             {section === 'statement' && (<>
 {/* Statement */}
               <div>
-                <p className="font-extrabold text-sm mb-2">Statement <span className="text-slate-400 font-semibold">— latest activity · tap a row for details, hold & cancel</span></p>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="font-extrabold text-sm">Statement <span className="text-slate-400 font-semibold">— latest activity · tap a row for details, hold & cancel</span></p>
+                <Btn variant="outline" className="!py-1.5 !text-xs shrink-0" onClick={() => { const rows = byDateDesc(db.txs.filter(t => t.userId === u.id)); if (!rows.length) return toast({ kind: 'error', title: 'Nothing to export yet' }); const csv = [['Date', 'Transaction ID', 'Title', 'Category', 'Amount (BDT)', 'Status'].join(','), ...rows.map(t => [new Date(t.createdAt).toISOString(), t.id, '"' + String(t.title).replace(/"/g, '""') + '"', t.category, t.amount, t.status].join(','))].join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'statement-' + u.username + '.csv'; a.click(); URL.revokeObjectURL(a.href) }}><Download size={13} /> Export CSV</Btn>
+              </div>
                 {stmt.length === 0 ? <p className="text-sm text-slate-400">No transactions yet.</p> : (
                   <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
                     {stmt.map(tx => { const dir = txDirection(tx.category, tx.amount); return (
@@ -1275,6 +1308,153 @@ export function AdminUserPage() {
                 )}
               </div>
             </>)}
+            {section === 'money' && (() => {
+              const deps = byDateDesc(db.deposits.filter(d => d.userId === u.id))
+              const wds = byDateDesc(db.withdrawals.filter(d => d.userId === u.id))
+              const lns = byDateDesc(db.loans.filter(d => d.userId === u.id))
+              const empty = deps.length === 0 && wds.length === 0 && lns.length === 0
+              return (
+                <div className="space-y-5">
+                  {empty && <p className="text-sm text-slate-400">No deposits, withdrawals or loans yet.</p>}
+                  {deps.length > 0 && (<section>
+                    <h3 className="font-extrabold mb-2 text-sm">Deposits</h3>
+                    <div className="space-y-2">{deps.map(d => (
+                      <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
+                        <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(d.amount)} · {d.method}</p><p className="text-xs text-slate-400">{d.id} · TrxID {d.trxId} · {fmtDateTime(d.createdAt)}</p></div>
+                        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideDeposit(d.id, true); toast({ kind: 'success', title: 'Deposit approved & credited' }) }}>Approve</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => { decideDeposit(d.id, false); toast({ kind: 'info', title: 'Deposit rejected' }) }}>Reject</Btn></>}
+                      </div>))}
+                    </div>
+                  </section>)}
+                  {wds.length > 0 && (<section>
+                    <h3 className="font-extrabold mb-2 text-sm">Withdrawals / Cash Out</h3>
+                    <div className="space-y-2">{wds.map(d => (
+                      <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
+                        <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(d.amount)} · {d.method}</p><p className="text-xs text-slate-400">{d.id} → {d.destination} · fee {usdt(d.fee)} · {fmtDateTime(d.createdAt)}</p></div>
+                        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideWithdraw(d.id, true); toast({ kind: 'success', title: 'Withdrawal completed' }) }}>Complete</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => { decideWithdraw(d.id, false); toast({ kind: 'info', title: 'Withdrawal rejected & refunded' }) }}>Reject</Btn></>}
+                      </div>))}
+                    </div>
+                  </section>)}
+                  {lns.length > 0 && (<section>
+                    <h3 className="font-extrabold mb-2 text-sm">Loans</h3>
+                    <div className="space-y-2">{lns.map(l => (
+                      <div key={l.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
+                        <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(l.amount)} · {l.months} months · {l.ratePct}%</p><p className="text-xs text-slate-400">{l.id} · EMI {usdt(l.emi)} · paid {usdt(l.paid)} of {usdt(l.totalPayable)} · {fmtDateTime(l.createdAt)}</p></div>
+                        <Badge tone={statusTone(l.status)}>{l.status}</Badge>
+                        {l.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideLoan(l.id, true); toast({ kind: 'success', title: 'Loan approved & disbursed' }) }}>Approve & disburse</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideLoan(l.id, false)}>Reject</Btn></>}
+                      </div>))}
+                    </div>
+                  </section>)}
+                </div>
+              )
+            })()}
+            {section === 'tickets' && (
+              <div className="space-y-2">
+                {byDateDesc(db.tickets.filter(t => t.userId === u.id)).length === 0 ? <p className="text-sm text-slate-400">No support chats yet.</p> : byDateDesc(db.tickets.filter(t => t.userId === u.id)).map(t => (
+                  <button key={t.id} onClick={() => navigate('/admin/support/' + t.id)} className="w-full flex items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-left hover:border-violet-300 transition">
+                    <span className="flex-1 min-w-0"><span className="block font-bold text-sm truncate">{t.subject}</span><span className="block text-xs text-slate-400 mt-0.5">{t.id} · {fmtDateTime(t.updatedAt ?? t.createdAt)}</span></span>
+                    {t.rating ? <span>{t.rating === 'up' ? '👍' : t.rating === 'down' ? '👎' : t.rating}</span> : null}
+                    <Badge tone={statusTone(t.status)}>{t.status}</Badge>
+                  </button>
+                ))}
+              </div>
+            )}
+            {section === 'sessions' && (
+              <div className="space-y-2">
+                {!extras ? <p className="text-sm text-slate-400">Loading sessions…</p> : extras.sessions.length === 0 ? <p className="text-sm text-slate-400">No sessions recorded for this user.</p> : extras.sessions.map((x: any) => (
+                  <div key={x.id} className="flex items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                    <Smartphone size={18} className="text-slate-400 shrink-0" />
+                    <span className="flex-1 min-w-0 text-sm"><b className="block truncate">{x.device || 'Unknown device'}</b><span className="text-xs text-slate-400 block truncate">{x.ip || 'IP not recorded'} · signed in {fmtDateTime(x.createdAt)}{x.lastSeenAt ? ' · last seen ' + fmtDateTime(x.lastSeenAt) : ''}</span></span>
+                    {x.revoked ? <Badge tone="red">revoked</Badge> : <Btn variant="danger" className="!py-1.5 !text-xs" onClick={async () => { try { await apiPost('/v1/admin/sessions/revoke', { sessionId: x.id }) } catch { /* reload anyway */ } loadExtras(); toast({ kind: 'success', title: 'Session revoked' }) }}>Revoke</Btn>}
+                  </div>
+                ))}
+                <p className="text-[11px] text-slate-400">Revoking a session signs that device out on its next request.</p>
+              </div>
+            )}
+            {section === 'risk' && (() => {
+              const openTickets = db.tickets.filter(t => t.userId === u.id && t.status !== 'resolved').length
+              const distinctIps = extras ? new Set(extras.sessions.map((x: any) => x.ip).filter(Boolean)).size : 0
+              const ageDays = Math.max(0, Math.floor((Date.now() - new Date(u.createdAt).getTime()) / 86400000))
+              const rows: [string, string, boolean][] = [
+                ['Transaction PIN', pinLocked ? 'Locked — too many wrong attempts' : (u.pinFailCount ?? 0) > 0 ? (u.pinFailCount + ' failed attempt' + ((u.pinFailCount ?? 0) === 1 ? '' : 's')) : 'No failed attempts', pinLocked || (u.pinFailCount ?? 0) >= 3],
+                ['Sessions', extras ? extras.sessions.filter((x: any) => !x.revoked).length + ' active · ' + distinctIps + ' different IP' + (distinctIps === 1 ? '' : 's') : 'Loading…', false],
+                ['Accounts sharing an IP', extras ? (extras.sameIpUsers.length ? extras.sameIpUsers.map((x: any) => (x.name || '@' + x.username)).join(', ') : 'None') : 'Loading…', !!extras && extras.sameIpUsers.length > 0],
+                ['Verification codes sent (7 days)', extras ? String(extras.otpCount7d) : 'Loading…', !!extras && extras.otpCount7d > 10],
+                ['Transactions on hold', String(heldTxs.length), heldTxs.length > 0],
+                ['Open support chats', String(openTickets), false],
+                ['Account age', ageDays + ' day' + (ageDays === 1 ? '' : 's'), false],
+              ]
+              return (
+                <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2.5 text-sm">
+                  {rows.map(([label, value, warn]) => (
+                    <div key={label} className="flex justify-between gap-3"><span className="text-slate-500">{label}</span><span className={'font-bold text-right ' + (warn ? 'text-amber-600 dark:text-amber-400' : '')}>{warn ? '⚠️ ' : ''}{value}</span></div>
+                  ))}
+                  <p className="text-[11px] text-slate-400 pt-1">Signals only — a shared IP can be a family or office network, and holds may be yours. Judge before acting.</p>
+                </div>
+              )
+            })()}
+            {section === 'emails' && (
+              <div className="space-y-2">
+                {!extras ? <p className="text-sm text-slate-400">Loading emails…</p> : extras.emails.length === 0 ? <p className="text-sm text-slate-400">No emails have been sent to this user yet.</p> : extras.emails.map((e: any) => (
+                  <div key={e.id} className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm">
+                    <div className="flex items-center gap-2"><b className="flex-1 min-w-0 truncate">{e.subject}</b><Badge tone={e.status === 'sent' ? 'green' : 'red'}>{e.status}</Badge></div>
+                    <p className="text-xs text-slate-400 mt-1 capitalize">{e.kind} · {fmtDateTime(e.createdAt)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {section === 'message' && (
+              <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                <p className="font-extrabold text-sm">Send a direct message</p>
+                <Input label="Title" value={msgTitle} onChange={e => setMsgTitle(e.target.value)} />
+                <div>
+                  <p className="text-xs font-bold text-slate-400 mb-1.5">MESSAGE</p>
+                  <textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} rows={4} placeholder="Write the message…" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-violet-500" />
+                </div>
+                <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer"><input type="checkbox" checked={msgEmail} onChange={e => setMsgEmail(e.target.checked)} className="accent-violet-600 w-4 h-4" /> Also send by email</label>
+                <Btn className="w-full" disabled={msgBusy || !msgTitle.trim() || !msgBody.trim()} onClick={async () => { setMsgBusy(true); try { await apiPost('/v1/admin/user-message', { userId: suidOf(u), title: msgTitle.trim(), body: msgBody.trim(), email: msgEmail }); setMsgTitle(''); setMsgBody(''); toast({ kind: 'success', title: 'Message sent to ' + u.name }) } catch (e: any) { toast({ kind: 'error', title: e.message || 'Sending failed' }) } setMsgBusy(false) }}>{msgBusy ? <Loader2 size={16} className="animate-spin" /> : <><Send size={15} /> Send message</>}</Btn>
+                <p className="text-[11px] text-slate-400">Delivered as an in-app notification{msgEmail ? ' and by email' : ''}. The send is written to the audit log.</p>
+              </div>
+            )}
+            {section === 'notes' && (
+              <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                <p className="font-extrabold text-sm flex items-center gap-2"><Tag size={15} className="text-violet-500" /> Admin notes & tags <span className="text-slate-400 font-semibold">— only admins see these</span></p>
+                <div className="flex flex-wrap gap-1.5">
+                  {['VIP', 'Watch', 'Fraud risk', 'Priority support', 'New user'].map(tg => (
+                    <button key={tg} onClick={() => setTagsSel(prev => prev.includes(tg) ? prev.filter(x => x !== tg) : [...prev, tg])} className={'px-3 py-1.5 rounded-full text-xs font-extrabold transition ' + (tagsSel.includes(tg) ? 'bg-violet-600 text-white shadow' : 'bg-slate-100 dark:bg-slate-800 text-slate-500')}>{tg}</button>
+                  ))}
+                </div>
+                <textarea value={notesText} onChange={e => setNotesText(e.target.value)} rows={5} placeholder="Private notes about this customer…" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-violet-500" />
+                <Btn className="w-full" disabled={notesBusy || !extras} onClick={async () => { setNotesBusy(true); try { await apiPost('/v1/admin/user-notes', { userId: suidOf(u), notes: notesText, tags: tagsSel }); toast({ kind: 'success', title: 'Notes saved' }) } catch (e: any) { toast({ kind: 'error', title: e.message || 'Saving failed' }) } setNotesBusy(false) }}>{notesBusy ? <Loader2 size={16} className="animate-spin" /> : 'Save notes & tags'}</Btn>
+              </div>
+            )}
+            {section === 'referrals' && (
+              <div className="space-y-2">
+                <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm space-y-2">
+                  <div className="flex justify-between gap-3"><span className="text-slate-500">Referral code</span><b>{u.referralCode}</b></div>
+                  <div className="flex justify-between gap-3"><span className="text-slate-500">Referred by</span>{extras?.referredBy ? <button className="font-bold text-violet-600" onClick={() => navigate('/admin/users/' + extras.referredBy.id)}>{extras.referredBy.name || '@' + extras.referredBy.username}</button> : <b>—</b>}</div>
+                  <div className="flex justify-between gap-3"><span className="text-slate-500">People referred</span><b>{extras ? extras.referrals.length : '…'}</b></div>
+                  <div className="flex justify-between gap-3"><span className="text-slate-500">Total referral earnings</span><b>{extras ? usdt(extras.referralEarningsBdt) : '…'}</b></div>
+                </div>
+                {extras?.referrals.map((r: any) => (
+                  <button key={r.id} onClick={() => navigate('/admin/users/' + r.id)} className="w-full flex items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-left hover:border-violet-300 transition">
+                    <span className="flex-1 min-w-0"><span className="block font-bold text-sm truncate">{r.name || '@' + r.username}</span><span className="block text-xs text-slate-400 mt-0.5">@{r.username} · joined {fmtDateTime(r.createdAt)}</span></span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {section === 'activity' && (
+              <div className="space-y-2">
+                {!extras ? <p className="text-sm text-slate-400">Loading activity…</p> : extras.audit.length === 0 ? <p className="text-sm text-slate-400">No recorded activity for this user yet.</p> : extras.audit.map((a: any) => (
+                  <div key={a.id} className="rounded-3xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm">
+                    <div className="flex items-center gap-2"><b className="flex-1 min-w-0 truncate">{a.action}</b><span className="text-xs text-slate-400 shrink-0">{fmtDateTime(a.createdAt)}</span></div>
+                    {a.detail ? <p className="text-xs text-slate-400 mt-1 break-words">{a.detail}</p> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
           </div>
         </div>
       </main>

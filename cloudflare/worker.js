@@ -1685,6 +1685,66 @@ async function handleTicketPinReveal(request, env, auth, body) {
   return json(request, { ok: true, pin: msg.text.slice("PINSECURE::".length) });
 }
 
+async function handleAdminUserExtras(request, env, auth, targetUid) {
+  const db = env.DB;
+  const u = await db.prepare("SELECT admin_notes, admin_tags FROM users WHERE id = ?").bind(targetUid).first();
+  if (!u) return json(request, { error: "user_not_found" }, 404);
+  const ses = await db.prepare("SELECT * FROM user_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 15").bind(targetUid).all();
+  const eml = await db.prepare("SELECT * FROM email_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 30").bind(targetUid).all();
+  const aud = await db.prepare("SELECT * FROM audit_logs WHERE actor = ? OR detail LIKE ? ORDER BY created_at DESC LIMIT 40").bind(targetUid, "%" + targetUid + "%").all();
+  const refBy = await db.prepare("SELECT r.referrer_id AS rid, p.full_name AS name, us.username AS username FROM referrals r JOIN users us ON us.id = r.referrer_id LEFT JOIN user_profiles p ON p.user_id = us.id WHERE r.referred_id = ?").bind(targetUid).first();
+  const refs = await db.prepare("SELECT r.referred_id AS rid, r.created_at AS cat, p.full_name AS name, us.username AS username FROM referrals r JOIN users us ON us.id = r.referred_id LEFT JOIN user_profiles p ON p.user_id = us.id WHERE r.referrer_id = ? ORDER BY r.created_at DESC LIMIT 50").bind(targetUid).all();
+  const earn = await db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ? AND category = 'referral' AND status = 'completed'").bind(targetUid).first();
+  const sameIp = await db.prepare("SELECT DISTINCT s2.user_id AS uid2, s2.ip AS ip, p.full_name AS name, us.username AS username FROM user_sessions s1 JOIN user_sessions s2 ON s2.ip = s1.ip AND s2.user_id != s1.user_id JOIN users us ON us.id = s2.user_id LEFT JOIN user_profiles p ON p.user_id = us.id WHERE s1.user_id = ? AND s1.ip != '' LIMIT 10").bind(targetUid).all();
+  const otp = await db.prepare("SELECT COUNT(*) AS n FROM email_log WHERE user_id = ? AND kind IN ('otp', 'verify') AND created_at >= ?").bind(targetUid, Date.now() - 7 * 86400000).first();
+  return json(request, { ok: true, extras: {
+    notes: u.admin_notes || "", tags: u.admin_tags ? String(u.admin_tags).split(",").map(x => x.trim()).filter(Boolean) : [],
+    sessions: ses.results.map(x => ({ id: x.id, device: x.device || "", ip: x.ip || "", createdAt: isoOf(x.created_at), lastSeenAt: x.last_seen_at ? isoOf(x.last_seen_at) : null, revoked: !!x.revoked })),
+    emails: eml.results.map(e => ({ id: e.id, kind: e.kind, subject: e.subject, status: e.status, createdAt: new Date(Number(e.created_at)).toISOString() })),
+    audit: aud.results.map(a => ({ id: String(a.id), actor: a.actor, action: a.action, detail: a.detail, createdAt: isoOf(a.created_at) })),
+    referredBy: refBy ? { id: refBy.rid, name: refBy.name || "", username: refBy.username } : null,
+    referrals: refs.results.map(r => ({ id: r.rid, name: r.name || "", username: r.username, createdAt: isoOf(r.cat) })),
+    referralEarningsBdt: Number(earn?.total || 0),
+    sameIpUsers: sameIp.results.map(r => ({ id: r.uid2, name: r.name || "", username: r.username, ip: r.ip })),
+    otpCount7d: Number(otp?.n || 0),
+  } });
+}
+
+async function handleAdminUserNotes(request, env, auth, body) {
+  const db = env.DB;
+  const targetUid = String(body.userId || "");
+  const notes = String(body.notes || "").slice(0, 2000);
+  const tags = Array.isArray(body.tags) ? body.tags.map(x => String(x).slice(0, 24)).filter(Boolean).slice(0, 8).join(",") : "";
+  const upd = await db.prepare("UPDATE users SET admin_notes = ?, admin_tags = ? WHERE id = ?").bind(notes, tags, targetUid).run();
+  if (!upd.meta || Number(upd.meta.changes || 0) === 0) return json(request, { error: "user_not_found" }, 404);
+  await auditLog(db, auth, "user.notes", targetUid + " tags=" + (tags || "-"));
+  return json(request, { ok: true });
+}
+
+async function handleAdminUserMessage(request, env, auth, body) {
+  const db = env.DB;
+  const targetUid = String(body.userId || "");
+  const title = String(body.title || "").trim().slice(0, 120);
+  const text = String(body.body || "").trim().slice(0, 1000);
+  if (!title || !text) return json(request, { error: "Title and message are required." }, 400);
+  const u = await db.prepare("SELECT id FROM users WHERE id = ?").bind(targetUid).first();
+  if (!u) return json(request, { error: "user_not_found" }, 404);
+  await notifyServer(db, targetUid, "account", title, text, "/");
+  if (body.email) { try { await sendUserEmail(env, db, targetUid, "account", title, title, [text]); } catch { /* best effort */ } }
+  await auditLog(db, auth, "user.message", targetUid + " " + title);
+  return json(request, { ok: true });
+}
+
+async function handleAdminSessionRevoke(request, env, auth, body) {
+  const db = env.DB;
+  const sid = String(body.sessionId || "");
+  const row = await db.prepare("SELECT user_id FROM user_sessions WHERE id = ?").bind(sid).first();
+  if (!row) return json(request, { error: "session_not_found" }, 404);
+  await db.prepare("UPDATE user_sessions SET revoked = 1 WHERE id = ?").bind(sid).run();
+  await auditLog(db, auth, "user.session_revoke", row.user_id + " " + sid);
+  return json(request, { ok: true });
+}
+
 async function handleTicketResolve(request, env, auth, body) {
   const db = env.DB;
   if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
@@ -2957,6 +3017,11 @@ export default {
         if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
         return json(request, { ok: true, cannedReplies: (await getSettingKey(env.DB, "canned_replies", null)) || DEFAULT_CANNED });
       }
+      if (path.startsWith("/v1/admin/user-extras") && request.method === "GET") {
+        if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);
+        const q = new URL(request.url).searchParams.get("userId") || "";
+        return await handleAdminUserExtras(request, env, auth, q);
+      }
       if (path.startsWith("/v1/admin/kyc/") && request.method === "GET") {
         if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);
         return await handleAdminKycGet(request, env, auth, decodeURIComponent(path.slice("/v1/admin/kyc/".length)));
@@ -2995,6 +3060,9 @@ export default {
           case "/v1/tickets": return await handleTicketCreate(request, env, auth, body);
           case "/v1/tickets/reply": return await handleTicketReply(request, env, auth, body);
           case "/v1/tickets/pin-reveal": return await handleTicketPinReveal(request, env, auth, body);
+          case "/v1/admin/user-notes": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserNotes(request, env, auth, body);
+          case "/v1/admin/user-message": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserMessage(request, env, auth, body);
+          case "/v1/admin/sessions/revoke": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminSessionRevoke(request, env, auth, body);
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
           case "/v1/admin/tickets/verify-start": return await handleTicketVerifyStart(request, env, auth, body);

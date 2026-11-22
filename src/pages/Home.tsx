@@ -6,11 +6,11 @@ import { COIN_META, useMarket } from '../lib/market'
 import { fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { Badge, Card, Modal, SkeletonRows, TxDirIcon, statusTone } from '../components/ui'
 
-const ACTIONS_RAW = [
+const ACTIONS_RAW: { to: string; labelKey: string; icon: any; g: string; soon?: boolean }[] = [
   { to: '/add', labelKey: 'act_add', icon: ArrowDownToLine, g: 'from-emerald-500 to-teal-600' },
   { to: '/cashout', labelKey: 'act_cashout', icon: ArrowUpFromLine, g: 'from-rose-500 to-pink-600' },
   { to: '/send', labelKey: 'act_send', icon: Send, g: 'from-violet-500 to-purple-600' },
-  { to: '/withdraw', labelKey: 'act_withdraw', icon: Banknote, g: 'from-blue-500 to-indigo-600' },
+  { to: '/withdraw', labelKey: 'act_withdraw', icon: Banknote, g: 'from-blue-500 to-indigo-600', soon: true },
   { to: '/receive', labelKey: 'act_receive', icon: QrCode, g: 'from-cyan-500 to-blue-600' },
   { to: '/referral', labelKey: 'act_referral', icon: Gift, g: 'from-amber-500 to-orange-600' },
   { to: '/earn', labelKey: 'act_earn', icon: PiggyBank, g: 'from-lime-500 to-green-600' },
@@ -21,7 +21,7 @@ const ACTIONS_RAW = [
   { to: '/trade', labelKey: 'act_trade', icon: TrendingUp, g: 'from-slate-600 to-slate-800' },
 ]
 export default function Home() {
-  const { user, db, walletOf, t, fmtMoney, fmtAmount, currency } = useApp()
+  const { user, db, walletOf, t, fmtMoney, fmtAmount, currency, toast } = useApp()
   const navigate = useNavigate()
   // Live balance: while the user holds crypto, prices (and therefore the
   // balance card) refresh every 10 seconds; otherwise every 60s is plenty.
@@ -82,8 +82,8 @@ export default function Home() {
       {/* Quick actions */}
       <div className="grid grid-cols-4 gap-x-3 gap-y-5">
         {ACTIONS.map(a => (
-          <button key={a.label} onClick={() => navigate(a.to)} className="flex flex-col items-center gap-2 group">
-            <span className={`w-14 h-14 rounded-[20px] bg-gradient-to-br ${a.g} text-white flex items-center justify-center shadow-lg group-active:scale-95 transition`}><a.icon size={23} /></span>
+          <button key={a.label} onClick={() => a.soon ? toast({ kind: 'info', title: 'Coming Soon', body: a.label + ' is coming soon.' }) : navigate(a.to)} className="flex flex-col items-center gap-2 group">
+            <span className={`w-14 h-14 rounded-[20px] bg-gradient-to-br ${a.g} text-white flex items-center justify-center shadow-lg group-active:scale-95 transition ${a.soon ? 'grayscale opacity-50 shadow-none' : ''}`}><a.icon size={23} /></span>
             <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 text-center leading-tight">{a.label}</span>
           </button>
         ))}

@@ -297,12 +297,11 @@ export function CashOut() {
 }
 
 export function SendMoney() {
-  const { db, user, sendMoney, walletOf, toast, t, currency, fmtMoney, toBDT, stepUp } = useApp()
+  const { db, user, sendMoney, walletOf, toast, t, currency, fmtMoney, toBDT } = useApp()
   const navigate = useNavigate()
   const [q, setQ] = useState(''); const [to, setTo] = useState<User | null>(null)
   const [sstep, setSstep] = useState(0)
-  const [amount, setAmount] = useState(''); const [note, setNote] = useState(''); const [pin, setPin] = useState(''); const [receipt, setReceipt] = useState<any>(null); const [errMsg, setErrMsg] = useState('')
-  const [stepPw, setStepPw] = useState('')
+  const [amount, setAmount] = useState(''); const [note, setNote] = useState(''); const [receipt, setReceipt] = useState<any>(null); const [errMsg, setErrMsg] = useState('')
   const results = useMemo(() => {
     if (!q.trim()) return []
     const s = q.trim().toLowerCase()
@@ -317,14 +316,10 @@ export function SendMoney() {
   const submit = async () => {
     if (!to) return toast({ kind: 'error', title: 'Select a recipient first' })
     if (!amtBDT || amtBDT < 10) return toast({ kind: 'error', title: 'Minimum send amount is ' + fmtMoney(10) })
-    const suTh = db.settings.stepUpThresholdBdt ?? 0
-    if (suTh && amtBDT > suTh) {
-      if (!stepPw) return setErrMsg('This transfer is above ৳' + suTh.toLocaleString() + ' — enter your account password for the extra verification.')
-      const se = await stepUp(stepPw); if (se) return setErrMsg(se); setStepPw('')
-    }
-    const r = await sendMoney({ toUserId: to.id, amount: amtBDT, note: note || undefined, pin })
+    if (to.level < 2) return setErrMsg("This account cannot receive money yet — the receiving account must be Level 2 or higher.")
+    const r = await sendMoney({ toUserId: to.id, amount: amtBDT, note: note || undefined })
     if (typeof r === 'string') return setErrMsg(r)
-    setReceipt(r); setPin('')
+    setReceipt(r)
   }
   return (
     <div>
@@ -351,6 +346,9 @@ export function SendMoney() {
                 <button onClick={() => setTo(null)} className="text-xs font-bold text-violet-600">Change</button>
               </div>
             )}
+            {to && to.level < 2 && (
+              <p className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/25 px-4 py-3 text-xs font-semibold text-amber-700 dark:text-amber-200">⚠️ This account is Level {to.level} — it can't receive money yet. The receiving account must be Level 2 or higher.</p>
+            )}
             <Input label={`Amount (${currency})`} type="number" placeholder="e.g. 1000" value={amount} onChange={e => setAmount(e.target.value)} />
             {currency !== 'BDT' && amt > 0 && <p className="text-xs text-slate-400 -mt-2">≈ {fmtUSDT(amtBDT / db.settings.bdtPerUsd)} at today's rate.</p>}
             <Input label="Note (optional)" placeholder="What's it for?" value={note} onChange={e => setNote(e.target.value)} />
@@ -363,6 +361,7 @@ export function SendMoney() {
               if (!to) return toast({ kind: 'error', title: 'Select a recipient first' })
               if (!amtBDT || amtBDT < 10) return toast({ kind: 'error', title: 'Minimum send amount is ' + fmtMoney(10) })
               if (amtBDT + fee > (w?.available ?? 0)) return toast({ kind: 'error', title: 'Insufficient balance (amount + fee exceeds available balance)' })
+              if (to.level < 2) return toast({ kind: 'error', title: "This account can't receive money yet", body: 'The receiving account must be Level 2 or higher.' })
               setSstep(1)
             }} />
           </div>
@@ -383,6 +382,7 @@ export function SendMoney() {
             {amtBDT >= 50000 && <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/25 p-4 text-sm"><b>⚠ Large transfer.</b> Please double-check the recipient — NovaWallet transfers are instant and cannot be reversed.</div>}
             <div className="space-y-2.5">
               <CheckLine ok>Recipient account is active{to.kyc === 'verified' ? ' and KYC-verified' : ''}</CheckLine>
+              <CheckLine ok={to.level >= 2}>Receiving account is Level 2 or higher (currently Level {to.level})</CheckLine>
               <CheckLine ok={amtBDT + fee <= (w?.available ?? 0)}>Amount + fee within your available balance</CheckLine>
             </div>
             <WizardNav onBack={() => setSstep(0)} nextLabel="Continue to confirm" onNext={() => setSstep(2)} />
@@ -394,12 +394,9 @@ export function SendMoney() {
               <div className="flex justify-between"><span className="text-slate-500">To</span><span className="font-bold">{to?.name}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Total debit</span><span className="font-extrabold">{fmtMoney(amtBDT + fee)}</span></div>
             </div>
-            <PinField pin={pin} setPin={setPin} />
-            <StepUpField amountBdt={amtBDT} value={stepPw} onChange={setStepPw} />
             <Btn className="w-full py-3.5" onClick={submit}>Confirm &amp; Send {fmtMoney(amtBDT)}</Btn>
             <button onClick={() => setSstep(1)} className="w-full text-center text-sm font-bold text-slate-500">Back to review</button>
-            <p className="text-center text-xs text-slate-500">{t('pin_forgot_prefix')} <Link to="/withdraw" className="font-bold text-violet-600 underline underline-offset-2">{t('act_withdraw')}</Link></p>
-            <p className="text-[11px] text-center text-slate-400">Transfers above your available balance are always blocked server-side in production.</p>
+            <p className="text-[11px] text-center text-slate-400">No PIN needed — sends are instant. The receiving account must be Level 2 or higher; this is enforced server-side.</p>
           </div>
         )}
       </Card>

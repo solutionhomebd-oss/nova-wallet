@@ -63,6 +63,16 @@ export function DirectWithdraw() {
     toast({ kind: 'success', title: 'Withdrawal completed', body: 'Money sent instantly — no admin review needed.' })
   }
   if (!user) return null
+  return (
+    <div>
+      <PageHead title="Direct Withdraw" sub="Instant · No PIN needed · Level 2" />
+      <Card className="p-8 text-center space-y-2">
+        <p className="text-4xl">🚧</p>
+        <p className="font-extrabold text-lg">Coming Soon</p>
+        <p className="text-sm text-slate-500">Direct Withdraw is coming soon. For now, please use Cash Out instead.</p>
+      </Card>
+    </div>
+  )
   if (db.settings.features?.withdrawals === false) return (
     <div>
       <PageHead title="Direct Withdraw" sub="Instant · No PIN needed · Level 2" />
@@ -121,7 +131,7 @@ export function DirectWithdraw() {
       )}
       <Level2GateModal open={gate} onClose={() => setGate(false)} feature="Direct Withdraw" />
       <SuccessModal open={done} onClose={() => setDone(false)} title="Withdrawal completed ⚡"
-        rows={lastTx ? [['Amount', fmtMoney(lastTx.amount)], ['Method', lastTx.method], ['Speed', 'Instant'], ['Status', 'Completed']] : []} />
+        rows={lastTx ? [['Amount', fmtMoney(lastTx?.amount ?? 0)], ['Method', lastTx?.method ?? ''], ['Speed', 'Instant'], ['Status', 'Completed']] : []} />
       <ResultModal open={!!errMsg} onClose={() => setErrMsg('')} kind="error" title="Withdrawal failed" body={errMsg} />
     </div>
   )

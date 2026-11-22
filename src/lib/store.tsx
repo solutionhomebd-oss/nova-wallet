@@ -124,7 +124,7 @@ interface Ctx {
   unstake: (stakeId: string) => Promise<string | null>
   swap: (fromSym: string, toSym: string, amountFrom: number, prices: Record<string, number>) => Promise<string | null>
   decideWithdraw: (id: string, ok: boolean) => Promise<void>
-  sendMoney: (p: { toUserId: string; amount: number; note?: string; pin: string }) => Promise<string | Tx>
+  sendMoney: (p: { toUserId: string; amount: number; note?: string }) => Promise<string | Tx>
   verifyTxPin: (pin: string) => string | null
   buyCrypto: (symbol: string, bdtAmount: number, priceUsd: number) => Promise<string | null>
   sellCrypto: (symbol: string, coinAmount: number, priceUsd: number) => Promise<string | null>
@@ -1190,9 +1190,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   const sendMoney: Ctx['sendMoney'] = async (p) => {
     if (!user) return 'Not signed in'
-    const lk = lockError(user.id); if (lk) return lk
-    if (user.pinHash !== hashSecret(p.pin)) return recordFail(user.id, 'Incorrect transaction PIN.')
-    recordSuccess(user.id)
     if (badAmount(p.amount)) return 'Enter a valid amount.'
     if (p.toUserId === user.id) return 'You cannot send money to yourself.'
     if (user.status === 'frozen') return 'Your wallet is frozen.'
@@ -1200,7 +1197,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const toUid = serverUidOf(p.toUserId)
     if (!toUid) return 'Recipient is not available on the server yet.'
     try {
-      const r = await apiPost('/v1/send', { toUserId: toUid, amount: p.amount, note: p.note, pin: p.pin })
+      const r = await apiPost('/v1/send', { toUserId: toUid, amount: p.amount, note: p.note })
       applyMoneyResult(r)
       return r.tx as Tx
     } catch (e: any) { return e.message }

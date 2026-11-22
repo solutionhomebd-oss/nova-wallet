@@ -742,13 +742,9 @@ async function statusGate(db, uid, opts = {}) {
 
 async function handleSend(request, env, auth, body) {
   const db = env.DB;
-  const { toUserId, amount, note, pin } = body;
+  const { toUserId, amount, note } = body;
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);
   if (!toUserId || toUserId === auth.uid) return json(request, { error: "You cannot send money to yourself." }, 400);
-  const pinErr = await checkPin(db, auth.uid, pin);
-  if (pinErr) return json(request, { error: pinErr }, 400);
-  const suErr = await stepUpGate(db, auth.uid, amount);
-  if (suErr) return json(request, suErr, 403);
   if (await dupTx(db, auth.uid, "send", amount)) return json(request, { error: DUP_ERR, code: "duplicate_recent" }, 400);
   const sender = await getUserRow(db, auth.uid);
   if (!sender) return json(request, { error: "Account not found." }, 404);
@@ -756,6 +752,7 @@ async function handleSend(request, env, auth, body) {
   if (sender.status === "suspended") return json(request, { error: "Your account is suspended." }, 400);
   const recipient = await getUserRow(db, toUserId);
   if (!recipient) return json(request, { error: "Recipient not found." }, 404);
+  if (Number(recipient.level) < 2) return json(request, { error: "This account can't receive money yet \u2014 the receiving account must be Level 2 or higher." }, 400);
   const settings = await getSettings(db);
   const disc = await feeDiscount(db, Number(sender.level));
   const fee = round2(amount * (settings.sendPct * (1 - disc / 100)) / 100);
@@ -847,7 +844,7 @@ async function handleWithdraw(request, env, auth, body) {
 }
 
 async function handleDirectWithdraw(request, env, auth, body) {
-  const db = env.DB;
+  return json(request, { error: "Direct Withdraw is coming soon." }, 403);
   if (await featureOff(db, "withdrawals")) return json(request, { error: "Withdrawals are temporarily unavailable. Please try again later." }, 403);
   const { method, amount, destination } = body;
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);

@@ -382,6 +382,9 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
               <Input label="Email" type="email" placeholder="you@email.com" value={form.email} onChange={set('email')} />
               <Input label={t('password_min')} type="password" placeholder="••••••••" value={form.password} onChange={set('password')} />
               <Input label={t('pin_4digit')} type="password" inputMode="numeric" maxLength={4} placeholder="••••" value={form.pin} onChange={set('pin')} />
+              <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/20 px-4 py-3">
+                <p className="text-xs text-amber-700 dark:text-amber-200 leading-relaxed">⚠️ <b>Remember this PIN forever.</b> Your transaction PIN can <b>never be changed</b> after registration — you will need it for every send, cash out and loan action. Pick one you will always remember, and never share it with anyone.</p>
+              </div>
               <Input label={t('referral_code_opt')} placeholder="NOVA-XXXXX" value={form.referralCode} onChange={set('referralCode')} />
               {TURNSTILE_SITE_KEY && <div ref={tsRef} className="flex justify-center" />}
               <Btn className="w-full py-3.5" disabled={regBusy} onClick={startRegister}>{regBusy ? <Loader2 size={17} className="animate-spin" /> : t('create_account')}</Btn>

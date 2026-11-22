@@ -2182,6 +2182,7 @@ const OTP_PURPOSE = {
   reset: { heading: "Password reset verification", intro: "Use the verification code below to reset your NovaWallet password:", ignore: "If you didn't request a password reset, please ignore this email. Your password will stay unchanged." },
   verify: { heading: "Verify your email address", intro: "Use the verification code below to complete your NovaWallet registration:", ignore: "If you didn't create a NovaWallet account, please ignore this email." },
   change: { heading: "Confirm your new email address", intro: "Use the verification code below to confirm this email address for your NovaWallet account:", ignore: "If you didn't request an email change, please ignore this email and contact support." },
+  changecurrent: { heading: "Verify it's you", intro: "Use the verification code below to confirm it's you before changing your NovaWallet account email:", ignore: "If you didn't request an email change, please ignore this email — your email will stay unchanged." },
 };
 function otpEmailText(code, purpose = "reset") {
   const p = OTP_PURPOSE[purpose] || OTP_PURPOSE.reset;
@@ -2285,8 +2286,55 @@ async function handlePasswordChangedNotice(request, env, auth) {
   await sendUserEmail(env, db, auth.uid, "security", "Your NovaWallet password was changed", "Password changed", ["Your NovaWallet password was just changed in the app.", "If this was not you, contact support immediately at support@novawallet.pp.ua and secure your account."]);
   return json(request, { ok: true });
 }
-async function handleEmailChangeRequest(request, env, auth, body) {
+// Email change is a TWO-STAGE proof (his design): first a code to the
+// CURRENT email proves the account owner; only then may a new email be
+// entered, and a second code to the NEW address completes the change.
+async function handleEmailChangeStart(request, env, auth) {
   const db = env.DB;
+  const me = await getUserRow(db, auth.uid);
+  if (!me?.email) return json(request, { error: "Account not found." }, 404);
+  const now = Date.now();
+  const prev = await db.prepare("SELECT stage, code_hash, expires_at FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
+  if (prev && Number(prev.stage) === 1 && prev.code_hash && Number(prev.expires_at) > now) {
+    return json(request, { ok: true, waitSeconds: Math.ceil((Number(prev.expires_at) - now) / 1000) });
+  }
+  const gate = await otpRateGate(db, me.email, clientIp(request));
+  if (gate > 0) return json(request, { ok: true, waitSeconds: gate });
+  const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+  const codeHash = await sha256Hex(me.email + ":" + code);
+  await db.prepare("INSERT INTO email_changes (user_id, new_email, code_hash, expires_at, attempts, last_sent_at, stage, stage_expires) VALUES (?, NULL, ?, ?, 0, ?, 1, NULL) ON CONFLICT(user_id) DO UPDATE SET new_email = NULL, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at, stage = 1, stage_expires = NULL")
+    .bind(auth.uid, codeHash, now + 2 * 60000, now).run();
+  const r = await sendAndLog(env, db, { userId: auth.uid, to: me.email, kind: "verify", subject: "Verify it's you — NovaWallet email change", text: otpEmailText(code, "changecurrent"), html: otpEmailHtml(code, "changecurrent"), ip: clientIp(request) });
+  if (!r.sent) {
+    try { await db.prepare("DELETE FROM email_changes WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
+    return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
+  }
+  return json(request, { ok: true, waitSeconds: 0 });
+}
+async function handleEmailChangeVerifyCurrent(request, env, auth, body) {
+  const db = env.DB;
+  const me = await getUserRow(db, auth.uid);
+  if (!me?.email) return json(request, { error: "Account not found." }, 404);
+  const code = String(body.code || "").trim();
+  const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
+  if (!row || Number(row.stage) !== 1 || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
+  if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
+  if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
+  const h = await sha256Hex(me.email + ":" + code);
+  if (h !== row.code_hash) {
+    await db.prepare("UPDATE email_changes SET attempts = attempts + 1 WHERE user_id = ?").bind(auth.uid).run();
+    return json(request, { error: OTP_ERR.wrong }, 400);
+  }
+  // Stage 1 proven — a 10-minute window to enter and confirm the new email.
+  await db.prepare("UPDATE email_changes SET code_hash = NULL, stage = 2, stage_expires = ? WHERE user_id = ?").bind(Date.now() + 10 * 60000, auth.uid).run();
+  return json(request, { ok: true });
+}
+async function handleEmailChangeRequestNew(request, env, auth, body) {
+  const db = env.DB;
+  const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
+  if (!row || Number(row.stage) !== 2 || !row.stage_expires || Date.now() > Number(row.stage_expires)) {
+    return json(request, { error: "stage_expired" }, 400);
+  }
   const newEmail = String(body.newEmail || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return json(request, { error: "Enter a valid email address." }, 400);
   const me = await getUserRow(db, auth.uid);
@@ -2295,19 +2343,18 @@ async function handleEmailChangeRequest(request, env, auth, body) {
   const taken = await db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").bind(newEmail, auth.uid).first();
   if (taken) return json(request, { error: "That email is already in use by another account." }, 400);
   const now = Date.now();
-  const prev = await db.prepare("SELECT code_hash, expires_at FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
-  if (prev?.code_hash && Number(prev.expires_at) > now) {
-    return json(request, { ok: true, waitSeconds: Math.ceil((Number(prev.expires_at) - now) / 1000) });
+  if (row.code_hash && row.new_email === newEmail && Number(row.expires_at) > now) {
+    return json(request, { ok: true, waitSeconds: Math.ceil((Number(row.expires_at) - now) / 1000) });
   }
   const gate = await otpRateGate(db, newEmail, clientIp(request));
   if (gate > 0) return json(request, { ok: true, waitSeconds: gate });
   const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
   const codeHash = await sha256Hex(newEmail + ":" + code);
-  await db.prepare("INSERT INTO email_changes (user_id, new_email, code_hash, expires_at, attempts, last_sent_at) VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT(user_id) DO UPDATE SET new_email = excluded.new_email, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, last_sent_at = excluded.last_sent_at")
-    .bind(auth.uid, newEmail, codeHash, now + 2 * 60000, now).run();
+  await db.prepare("UPDATE email_changes SET new_email = ?, code_hash = ?, expires_at = ?, attempts = 0, last_sent_at = ? WHERE user_id = ?")
+    .bind(newEmail, codeHash, now + 2 * 60000, now, auth.uid).run();
   const r = await sendAndLog(env, db, { userId: auth.uid, to: newEmail, kind: "verify", subject: "Confirm your new NovaWallet email address", text: otpEmailText(code, "change"), html: otpEmailHtml(code, "change"), ip: clientIp(request) });
   if (!r.sent) {
-    try { await db.prepare("DELETE FROM email_changes WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
+    try { await db.prepare("UPDATE email_changes SET code_hash = NULL WHERE user_id = ?").bind(auth.uid).run(); } catch { /* ignore */ }
     return json(request, { error: "We couldn't send the email. Please try again in a moment." }, 502);
   }
   return json(request, { ok: true, waitSeconds: 0 });
@@ -2316,7 +2363,7 @@ async function handleEmailChangeConfirm(request, env, auth, body) {
   const db = env.DB;
   const code = String(body.code || "").trim();
   const row = await db.prepare("SELECT * FROM email_changes WHERE user_id = ?").bind(auth.uid).first();
-  if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
+  if (!row || Number(row.stage) !== 2 || !row.new_email || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
   if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
   if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
   const h = await sha256Hex(row.new_email + ":" + code);
@@ -2639,7 +2686,9 @@ export default {
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
           case "/v1/levels/request": return await handleLevelRequest(request, env, auth, body);
           case "/v1/email-prefs": return await handleEmailPrefs(request, env, auth, body);
-          case "/v1/email-change/request": return await handleEmailChangeRequest(request, env, auth, body);
+          case "/v1/email-change/start": return await handleEmailChangeStart(request, env, auth);
+          case "/v1/email-change/verify-current": return await handleEmailChangeVerifyCurrent(request, env, auth, body);
+          case "/v1/email-change/request-new": return await handleEmailChangeRequestNew(request, env, auth, body);
           case "/v1/email-change/confirm": return await handleEmailChangeConfirm(request, env, auth, body);
           case "/v1/security/password-changed": return await handlePasswordChangedNotice(request, env, auth);
         }

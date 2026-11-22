@@ -102,7 +102,9 @@ interface Ctx {
   confirmRegOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
   emailPrefs: { txEmails: boolean }
   setTxEmails: (v: boolean) => Promise<void>
-  requestEmailChange: (newEmail: string) => Promise<{ error: string | null; waitSeconds: number }>
+  startEmailChange: () => Promise<{ error: string | null; waitSeconds: number }>
+  verifyCurrentEmail: (code: string) => Promise<string | null>
+  requestNewEmailOtp: (newEmail: string) => Promise<{ error: string | null; waitSeconds: number }>
   confirmEmailChange: (code: string) => Promise<string | null>
   verifyEmailOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
   resetPasswordByGrant: (email: string, grant: string, newPassword: string) => Promise<string | null>
@@ -977,11 +979,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   // Change account email: OTP to the NEW address proves ownership; the
   // Worker then updates Firebase + D1 and alerts the old address.
-  const requestEmailChange: Ctx['requestEmailChange'] = async (newEmail) => {
+  const startEmailChange: Ctx['startEmailChange'] = async () => {
     try {
-      const r = await apiPost('/v1/email-change/request', { newEmail: newEmail.trim().toLowerCase() })
+      const r = await apiPost('/v1/email-change/start', {})
       return { error: null, waitSeconds: Number(r.waitSeconds || 0) }
     } catch (e: any) {
+      return { error: e.message || 'Could not send the verification code.', waitSeconds: 0 }
+    }
+  }
+  const verifyCurrentEmail: Ctx['verifyCurrentEmail'] = async (code) => {
+    try {
+      await apiPost('/v1/email-change/verify-current', { code })
+      return null
+    } catch (e: any) {
+      return e.message || 'Verification failed.'
+    }
+  }
+  const requestNewEmailOtp: Ctx['requestNewEmailOtp'] = async (newEmail) => {
+    try {
+      const r = await apiPost('/v1/email-change/request-new', { newEmail: newEmail.trim().toLowerCase() })
+      return { error: null, waitSeconds: Number(r.waitSeconds || 0) }
+    } catch (e: any) {
+      if (e.message === 'stage_expired') return { error: 'stage_expired', waitSeconds: 0 }
       return { error: e.message || 'Could not send the verification code.', waitSeconds: 0 }
     }
   }
@@ -1696,7 +1715,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, setUserLoanLimit,
-    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, requestEmailChange, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
+    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }
   return (
     <AppCtx.Provider value={value}>

@@ -18,7 +18,7 @@ const SUPPORT_CHANNELS = [
   { label: 'Email', href: 'mailto:support@novawallet.pp.ua', icon: Mail, cls: 'bg-violet-600' },
 ]
 export default function Profile() {
-  const { user, db, walletOf, updateProfile, changePassword, changePin, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, emailPrefs, setTxEmails, requestEmailChange, confirmEmailChange, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
+  const { user, db, walletOf, updateProfile, changePassword, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
   const wEarlyP = db.wallets.find(x => x.userId === user?.id)
   const { coins } = useMarket(wEarlyP && Object.entries(wEarlyP.holdings).some(([s, a]) => s !== 'USDT' && a > 0) ? 10_000 : 60_000)
   const navigate = useNavigate()
@@ -57,6 +57,75 @@ export default function Profile() {
   const [fpOtp, setFpOtp] = useState('')
   const [fpOtpDemo, setFpOtpDemo] = useState<string | null>(null)
   const [fpOtpVerified, setFpOtpVerified] = useState(false)
+  const [fpMode, setFpMode] = useState<'server' | 'local'>('server')
+  const [fpGrant, setFpGrant] = useState<string | null>(null)
+  const [fpBusy, setFpBusy] = useState(false)
+  const [fpSent, setFpSent] = useState(false)
+  const fpWaitToast = (secs: number) => { const m = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0'); toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${fp.email}. It stays valid for ${m}:${ss} more — enter it below, or wait for it to expire to request a new one.` }) }
+  const sendFpCodeP = async () => {
+    if (fpBusy) return
+    setFpBusy(true)
+    try {
+      const r = await requestEmailOtp(fp.email)
+      if (r.error) { toast({ kind: 'error', title: r.error }); return }
+      if (r.emailed) {
+        setFpMode('server'); setFpOtpDemo(null)
+        if (r.waitSeconds > 0) fpWaitToast(r.waitSeconds)
+        else toast({ kind: 'success', title: 'Verification code sent', body: 'Check your inbox for a 6-digit code.' })
+        setFpSent(true); setFpOtp(''); setFpOtpVerified(false)
+      } else {
+        const lr = requestPasswordOtp(fp.email)
+        if (lr.error) { toast({ kind: 'error', title: lr.error }); return }
+        setFpMode('local')
+        if (lr.waitSeconds > 0) { fpWaitToast(lr.waitSeconds); setFpOtpDemo(null); setFpSent(true); setFpOtpVerified(false); return }
+        setFpOtpDemo(lr.otp); setFpSent(true); setFpOtp(''); setFpOtpVerified(false)
+        toast({ kind: 'success', title: 'Verification code sent', body: 'Check your inbox for a 6-digit code.' })
+      }
+    } finally { setFpBusy(false) }
+  }
+  const verifyFpCodeP = async () => {
+    if (fpBusy) return
+    if (fpMode === 'server') {
+      setFpBusy(true)
+      try {
+        const r = await verifyEmailOtp(fp.email, fpOtp)
+        if (r.error) { toast({ kind: 'error', title: r.error }); return }
+        setFpGrant(r.grant); setFpOtpVerified(true); toast({ kind: 'success', title: 'Email verified ✓', body: 'Now choose your new password.' })
+      } finally { setFpBusy(false) }
+    } else {
+      const e = verifyPasswordOtp(fp.email, fpOtp)
+      if (e) { toast({ kind: 'error', title: e }); return }
+      setFpOtpVerified(true); toast({ kind: 'success', title: 'Email verified ✓', body: 'Now choose your new password.' })
+    }
+  }
+  const doResetOtpP = async () => {
+    if (fpBusy) return
+    if (fpMode === 'server') {
+      setFpBusy(true)
+      try {
+        const e = await resetPasswordByGrant(fp.email, fpGrant || '', fp.next)
+        if (e) { toast({ kind: 'error', title: e }); return }
+      } finally { setFpBusy(false) }
+    } else {
+      const e = resetPasswordWithOtp(fp.email, fpOtp, fp.next)
+      if (e) { toast({ kind: 'error', title: e }); return }
+    }
+    setModal(null); setFp({ email: user?.email ?? fp.email, pin: '', next: '', confirm: '' }); setFpOtp(''); setFpOtpDemo(null); setFpOtpVerified(false); setFpSent(false); setFpGrant(null)
+    toast({ kind: 'success', title: 'Password reset complete', body: 'Use your new password the next time you log in or unlock.' })
+  }
+  const doResetPinP = async () => {
+    if (fpBusy) return
+    setFpBusy(true)
+    try {
+      const e = await resetPasswordByPin(fp.email, fp.pin, fp.next)
+      if (e === 'account_not_on_server') {
+        const le = resetPassword(fp.email, fp.pin, fp.next)
+        if (le) { toast({ kind: 'error', title: le }); return }
+      } else if (e) { toast({ kind: 'error', title: e }); return }
+    } finally { setFpBusy(false) }
+    setModal(null); setFp({ email: user?.email ?? fp.email, pin: '', next: '', confirm: '' })
+    toast({ kind: 'success', title: 'Password reset complete', body: 'Use your new password the next time you log in or unlock.' })
+  }
   const [pmForm, setPmForm] = useState<{ show: boolean; id: string | null; type: 'bank' | 'crypto'; label: string; detail: string; network: string }>({ show: false, id: null, type: 'bank', label: '', detail: '', network: CRYPTO_NETWORK_LABELS[3] })
   const pmFormReset = { show: false, id: null, type: 'bank' as const, label: '', detail: '', network: CRYPTO_NETWORK_LABELS[3] }
   const openPmEdit = (m: { id: string; type: 'bank' | 'crypto'; label: string; detail: string }) => {
@@ -67,7 +136,6 @@ export default function Profile() {
     }
     setPmForm({ show: true, id: m.id, type: m.type, label: m.label, detail: m.detail, network: CRYPTO_NETWORK_LABELS[3] })
   }
-  const [pin, setPin] = useState({ old: '', next: '', confirm: '' })
   const [ticket, setTicket] = useState({ subject: '', message: '' })
   const [chatText, setChatText] = useState('')
   const [sending, setSending] = useState(false)
@@ -157,25 +225,44 @@ export default function Profile() {
   const cryptoBdtP = Object.entries(w.holdings).filter(([sym]) => sym !== 'USDT').reduce((sum, [sym, amt]) => sum + amt * priceOfP(sym) * db.settings.bdtPerUsd, 0)
   const totalBdtP = w.available + w.locked + usdtBdtP + cryptoBdtP
   const rows: [string, string, any][] = [
-    ['p_edit', 'edit', <UserRound size={18} />], ['p_password', 'pw', <KeyRound size={18} />], ['p_pin', 'pin', <Hash size={18} />],
+    ['p_edit', 'edit', <UserRound size={18} />], ['p_password', 'pw', <KeyRound size={18} />],
     ['p_login_options', 'login', <Fingerprint size={18} />], ['p_kyc', 'kyc', <ShieldCheck size={18} />], ['p_methods', 'methods', <CreditCard size={18} />],
     ['p_notif', 'notif', <Bell size={18} />], ['p_language', 'lang', <Globe size={18} />], ['p_currency', 'currency', <Coins size={18} />],
     ['p_sessions', 'sessions', <Smartphone size={18} />], ['p_email', 'email', <Mail size={18} />], ['p_terms', 'terms', <FileText size={18} />],
   ]
-  const [ecStep, setEcStep] = useState<'view' | 'code'>('view'); const [ecEmail, setEcEmail] = useState(''); const [ecCode, setEcCode] = useState(''); const [ecBusy, setEcBusy] = useState(false)
-  const sendEcCode = async () => {
+  const [ecStep, setEcStep] = useState<'current' | 'new' | 'newcode'>('current'); const [ecSent, setEcSent] = useState(false); const [ecEmail, setEcEmail] = useState(''); const [ecCode, setEcCode] = useState(''); const [ecBusy, setEcBusy] = useState(false)
+  const ecWaitToast = (addr: string, secs: number) => { const m = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0'); toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${addr}. It stays valid for ${m}:${ss} more — enter it below.` }) }
+  const sendEcCurrent = async () => {
     if (ecBusy) return
     setEcBusy(true)
     try {
-      const r = await requestEmailChange(ecEmail)
+      const r = await startEmailChange()
       if (r.error) { toast({ kind: 'error', title: r.error }); return }
-      if (r.waitSeconds > 0) {
-        const m = Math.floor(r.waitSeconds / 60), ss = String(r.waitSeconds % 60).padStart(2, '0')
-        toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${ecEmail.trim().toLowerCase()}. It stays valid for ${m}:${ss} more — enter it below.` })
-      } else {
-        toast({ kind: 'success', title: 'Code sent', body: 'Enter the 6-digit code sent to your new email address.' })
-      }
-      setEcCode(''); setEcStep('code')
+      if (r.waitSeconds > 0) ecWaitToast(user.email, r.waitSeconds)
+      else toast({ kind: 'success', title: 'Code sent', body: 'Enter the 6-digit code sent to your current email.' })
+      setEcCode(''); setEcSent(true)
+    } finally { setEcBusy(false) }
+  }
+  const verifyEcCurrent = async () => {
+    if (ecBusy) return
+    setEcBusy(true)
+    try {
+      const e = await verifyCurrentEmail(ecCode)
+      if (e) { toast({ kind: 'error', title: e }); return }
+      setEcStep('new'); setEcCode(''); setEcSent(false)
+      toast({ kind: 'success', title: 'Current email verified ✓', body: 'Now enter your new email address.' })
+    } finally { setEcBusy(false) }
+  }
+  const sendEcNew = async () => {
+    if (ecBusy) return
+    setEcBusy(true)
+    try {
+      const r = await requestNewEmailOtp(ecEmail)
+      if (r.error === 'stage_expired') { toast({ kind: 'error', title: 'Verification expired — please verify your current email again.' }); setEcStep('current'); setEcSent(false); return }
+      if (r.error) { toast({ kind: 'error', title: r.error }); return }
+      if (r.waitSeconds > 0) ecWaitToast(ecEmail.trim().toLowerCase(), r.waitSeconds)
+      else toast({ kind: 'success', title: 'Code sent', body: 'Enter the 6-digit code sent to your new email address.' })
+      setEcCode(''); setEcStep('newcode')
     } finally { setEcBusy(false) }
   }
   const confirmEc = async () => {
@@ -185,7 +272,7 @@ export default function Profile() {
       const e = await confirmEmailChange(ecCode)
       if (e) { toast({ kind: 'error', title: e }); return }
       toast({ kind: 'success', title: 'Email changed', body: 'Your account email is now ' + ecEmail.trim().toLowerCase() + '.' })
-      setModal(null); setEcStep('view'); setEcEmail(''); setEcCode('')
+      setModal(null); setEcStep('current'); setEcSent(false); setEcEmail(''); setEcCode('')
     } finally { setEcBusy(false) }
   }
   return (
@@ -377,28 +464,28 @@ export default function Profile() {
               <ShieldCheck size={17} className="text-violet-600 shrink-0 mt-0.5" />
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">For your safety, 5 wrong PIN attempts lock password reset for 5 minutes, and you'll get a security notification as soon as the password changes.</p>
             </div>
-            <Btn className="w-full py-3.5" disabled={!fp.email.trim() || fp.pin.length !== 4 || fp.next.length < 6 || fp.confirm !== fp.next} onClick={() => { const e = resetPassword(fp.email, fp.pin, fp.next); if (e) return toast({ kind: 'error', title: e }); setModal(null); setFp({ email: user.email, pin: '', next: '', confirm: '' }); toast({ kind: 'success', title: 'Password reset complete', body: 'Use your new password the next time you log in or unlock.' }) }}>Reset password</Btn>
+            <Btn className="w-full py-3.5" disabled={!fp.email.trim() || fp.pin.length !== 4 || fp.next.length < 6 || fp.confirm !== fp.next || fpBusy} onClick={doResetPinP}>{fpBusy ? <Loader2 size={17} className="animate-spin" /> : 'Reset password'}</Btn>
           </div>
         ) : (
           <div className="space-y-5">
-            <Input label="Account email" type="email" placeholder="you@email.com" value={fp.email} onChange={e => { setFp(s => ({ ...s, email: e.target.value })); setFpOtpDemo(null); setFpOtpVerified(false); setFpOtp('') }} />
-            {!fpOtpDemo ? (
+            <Input label="Account email" type="email" placeholder="you@email.com" value={fp.email} onChange={e => { setFp(s => ({ ...s, email: e.target.value })); setFpOtpDemo(null); setFpOtpVerified(false); setFpOtp(''); setFpSent(false); setFpGrant(null) }} />
+            {!fpSent ? (
               <>
                 <p className="text-sm text-slate-500 leading-relaxed">We'll send a <b>6-digit verification code</b> to this email address. Enter the code on the next step to prove it's you.</p>
-                <Btn className="w-full py-3.5" disabled={!fp.email.trim()} onClick={() => { const r = requestPasswordOtp(fp.email); if (r.error) return toast({ kind: 'error', title: r.error }); setFpOtpDemo(r.otp); setFpOtp(''); setFpOtpVerified(false); toast({ kind: 'success', title: 'Verification code sent', body: 'Check your inbox for a 6-digit code.' }) }}><Mail size={17} /> Send 6-digit code</Btn>
+                <Btn className="w-full py-3.5" disabled={!fp.email.trim() || fpBusy} onClick={sendFpCodeP}>{fpBusy ? <Loader2 size={17} className="animate-spin" /> : <><Mail size={17} /> Send 6-digit code</>}</Btn>
               </>
             ) : (
               <>
                 <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3.5 text-center">
-                  <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{fp.email}</b>. It expires in 10 minutes.</p>
+                  <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{fp.email}</b>. It expires in 2 minutes.</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">Don't see it in your inbox? Please check your <b>spam or junk folder</b> — sometimes it lands there.</p>
-                  <p className="text-xs font-bold text-violet-600 dark:text-violet-300 mt-2.5">Demo mode — your code is shown here: <span className="font-mono text-base tracking-[.3em]">{fpOtpDemo}</span></p>
+                  {fpOtpDemo && <p className="text-xs font-bold text-violet-600 dark:text-violet-300 mt-2.5">Demo mode — your code is shown here: <span className="font-mono text-base tracking-[.3em]">{fpOtpDemo}</span></p>}
                 </div>
                 {!fpOtpVerified ? (
                   <>
                     <PinBoxes label="Enter the 6-digit code" length={6} showDigits value={fpOtp} onChange={setFpOtp} />
-                    <Btn className="w-full py-3.5" disabled={fpOtp.length !== 6} onClick={() => { const e = verifyPasswordOtp(fp.email, fpOtp); if (e) return toast({ kind: 'error', title: e }); setFpOtpVerified(true); toast({ kind: 'success', title: 'Email verified ✓', body: 'Now choose your new password.' }) }}>Verify code</Btn>
-                    <button onClick={() => { const r = requestPasswordOtp(fp.email); if (r.error) return toast({ kind: 'error', title: r.error }); setFpOtpDemo(r.otp); setFpOtp(''); toast({ kind: 'success', title: 'A new code was sent', body: 'Check your inbox — or use the code shown on screen.' }) }} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
+                    <Btn className="w-full py-3.5" disabled={fpOtp.length !== 6 || fpBusy} onClick={verifyFpCodeP}>{fpBusy ? <Loader2 size={17} className="animate-spin" /> : 'Verify code'}</Btn>
+                    <button onClick={sendFpCodeP} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
                   </>
                 ) : (
                   <>
@@ -409,39 +496,13 @@ export default function Profile() {
                     </div>
                     <Input label="Confirm new password" type="password" placeholder="••••••••" value={fp.confirm} onChange={e => setFp(s => ({ ...s, confirm: e.target.value }))} />
                     {fp.confirm && fp.next && fp.confirm !== fp.next && <p className="text-center text-sm font-bold text-rose-500">The passwords don't match yet.</p>}
-                    <Btn className="w-full py-3.5" disabled={fp.next.length < 6 || fp.confirm !== fp.next} onClick={() => { const e = resetPasswordWithOtp(fp.email, fpOtp, fp.next); if (e) return toast({ kind: 'error', title: e }); setModal(null); setFp({ email: user.email, pin: '', next: '', confirm: '' }); setFpOtp(''); setFpOtpDemo(null); setFpOtpVerified(false); toast({ kind: 'success', title: 'Password reset complete', body: 'Use your new password the next time you log in or unlock.' }) }}>Reset password</Btn>
+                    <Btn className="w-full py-3.5" disabled={fp.next.length < 6 || fp.confirm !== fp.next || fpBusy} onClick={doResetOtpP}>{fpBusy ? <Loader2 size={17} className="animate-spin" /> : 'Reset password'}</Btn>
                   </>
                 )}
               </>
             )}
           </div>
         )}
-      </Modal>
-      <Modal open={modal === 'pin'} onClose={() => setModal(null)} title={t('p_pin')}>
-        <div className="flex flex-col items-center text-center mb-2">
-          <span className="w-14 h-14 rounded-3xl bg-gradient-to-br from-violet-600 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-violet-600/25 mb-3"><Hash size={24} /></span>
-          <ModalDesc>Your 4-digit transaction PIN confirms sends and cash outs. Follow the three steps — it takes ten seconds.</ModalDesc>
-        </div>
-        <div className="flex items-center justify-center gap-2 mb-5 text-[11px] font-extrabold">
-          {[{ n: '1', l: 'Current PIN', done: pin.old.length === 4 }, { n: '2', l: 'New PIN', done: pin.next.length === 4 }, { n: '3', l: 'Confirm', done: pin.confirm.length === 4 && pin.confirm === pin.next }].map((st, i) => (
-            <span key={st.l} className="flex items-center gap-2">
-              {i > 0 && <span className="w-5 h-px bg-slate-300 dark:bg-slate-600" />}
-              <span className={`inline-flex items-center gap-1.5 ${st.done ? 'text-emerald-600' : 'text-slate-400'}`}><span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white ${st.done ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>{st.done ? '✓' : st.n}</span>{st.l}</span>
-            </span>
-          ))}
-        </div>
-        <div className="space-y-6">
-          <PinBoxes label="Step 1 · Current PIN" value={pin.old} onChange={v => setPin(s => ({ ...s, old: v }))} />
-          <PinBoxes label="Step 2 · New PIN" value={pin.next} onChange={v => setPin(s => ({ ...s, next: v }))} />
-          <PinBoxes label="Step 3 · Confirm new PIN" value={pin.confirm} onChange={v => setPin(s => ({ ...s, confirm: v }))} />
-          {pin.confirm.length === 4 && pin.next.length === 4 && pin.confirm !== pin.next && <p className="text-center text-sm font-bold text-rose-500">The new PIN and confirmation don't match yet.</p>}
-          {pin.confirm.length === 4 && pin.confirm === pin.next && pin.next.length === 4 && <p className="text-center text-sm font-bold text-emerald-600">✓ New PIN confirmed — you're ready to save.</p>}
-          <div className="rounded-2xl bg-violet-50 dark:bg-violet-500/10 px-4 py-3 flex gap-2.5">
-            <ShieldCheck size={17} className="text-violet-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed"><b>Keep it private.</b> Never share your PIN with anyone — NovaWallet staff will never ask for it. Avoid birth years and easy sequences like 1234. PINs are stored hashed, never in plain text.</p>
-          </div>
-          <Btn className="w-full py-3.5" disabled={pin.old.length !== 4 || pin.next.length !== 4 || pin.confirm !== pin.next} onClick={async () => { const e = await changePin(pin.old, pin.next); if (e) toast({ kind: 'error', title: e }); else { setModal(null); setPin({ old: '', next: '', confirm: '' }); toast({ kind: 'success', title: 'PIN changed', body: 'Use your new PIN for your next send or cash out.' }) } }}>{t('p_pin')}</Btn>
-        </div>
       </Modal>
       <Modal open={modal === 'kyc'} onClose={() => setModal(null)} title={t('p_kyc')}>
         {user.kyc === 'verified' ? (
@@ -583,8 +644,8 @@ export default function Profile() {
         </div>
         <ModalActions><Btn className="w-full py-3.5" onClick={() => { setModal(null); toast({ kind: 'success', title: 'Preferences saved' }) }}>{t('save')}</Btn></ModalActions>
       </Modal>
-      <Modal open={modal === 'email'} onClose={() => { setModal(null); setEcStep('view') }} title={t('p_email')}>
-        <ModalDesc>Your account email is used for sign-in, verification codes and receipts.</ModalDesc>
+      <Modal open={modal === 'email'} onClose={() => { setModal(null); setEcStep('current'); setEcSent(false) }} title={t('p_email')}>
+        <ModalDesc>Changing your email takes two proofs: a code to your current email first, then a code to the new one.</ModalDesc>
         <div className="space-y-2.5">
           <ModalRow>
             <span className="flex items-center justify-between gap-3">
@@ -592,20 +653,38 @@ export default function Profile() {
               {user.emailVerified ? <Badge tone="green">✓ Verified</Badge> : <Badge tone="amber">Not verified</Badge>}
             </span>
           </ModalRow>
-          {ecStep === 'view' ? (
+          {ecStep === 'current' && (!ecSent ? (
             <>
-              <Input label="New email address" type="email" placeholder="you@email.com" value={ecEmail} onChange={e => setEcEmail(e.target.value)} />
-              <Btn className="w-full py-3" disabled={!ecEmail.trim() || ecBusy} onClick={sendEcCode}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Send verification code'}</Btn>
+              <p className="text-sm text-slate-500 leading-relaxed">Step 1 of 2 — we'll send a <b>6-digit code to your current email</b> ({user.email}) to prove it's really you.</p>
+              <Btn className="w-full py-3" disabled={ecBusy} onClick={sendEcCurrent}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Send code to current email'}</Btn>
             </>
           ) : (
             <>
               <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3 text-center">
-                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 Code sent to {ecEmail.trim().toLowerCase()} — it expires in 2 minutes.</p>
+                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 Step 1 of 2 — code sent to {user.email}. It expires in 2 minutes.</p>
+              </div>
+              <PinBoxes label="Enter the 6-digit code" length={6} showDigits value={ecCode} onChange={setEcCode} />
+              <Btn className="w-full py-3" disabled={ecCode.length !== 6 || ecBusy} onClick={verifyEcCurrent}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Verify current email'}</Btn>
+              <button onClick={sendEcCurrent} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
+            </>
+          ))}
+          {ecStep === 'new' && (
+            <>
+              <p className="text-center text-sm font-bold text-emerald-600">✓ Current email verified — step 2 of 2.</p>
+              <Input label="New email address" type="email" placeholder="you@email.com" value={ecEmail} onChange={e => setEcEmail(e.target.value)} />
+              <Btn className="w-full py-3" disabled={!ecEmail.trim() || ecBusy} onClick={sendEcNew}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Send code to new email'}</Btn>
+              <button onClick={() => { setEcStep('current'); setEcSent(false) }} className="w-full text-center text-sm font-bold text-slate-500">← Start over</button>
+            </>
+          )}
+          {ecStep === 'newcode' && (
+            <>
+              <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3 text-center">
+                <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 Step 2 of 2 — code sent to {ecEmail.trim().toLowerCase()}. It expires in 2 minutes.</p>
               </div>
               <PinBoxes label="Enter the 6-digit code" length={6} showDigits value={ecCode} onChange={setEcCode} />
               <Btn className="w-full py-3" disabled={ecCode.length !== 6 || ecBusy} onClick={confirmEc}>{ecBusy ? <Loader2 size={16} className="animate-spin" /> : 'Confirm new email'}</Btn>
-              <button onClick={sendEcCode} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
-              <button onClick={() => setEcStep('view')} className="w-full text-center text-sm font-bold text-slate-500">← Different email</button>
+              <button onClick={sendEcNew} className="w-full text-center text-sm font-bold text-violet-600">Didn't get it? Resend code</button>
+              <button onClick={() => setEcStep('new')} className="w-full text-center text-sm font-bold text-slate-500">← Different email</button>
             </>
           )}
           <ModalRow><label className="flex items-center justify-between font-semibold text-sm">Transaction emails

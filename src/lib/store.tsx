@@ -8,7 +8,7 @@ import { fmtBDT } from './utils'
 import { hashSecret, nowISO, rid, uid } from './utils'
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut as fbSignOut, updatePassword as fbUpdatePassword } from 'firebase/auth'
 import { firebaseAuth } from './firebase'
-import { apiBootstrap, apiMe, apiGet, apiPost } from './api'
+import { apiBootstrap, apiMe, apiGet, apiPost, publicPost } from './api'
 
 const KEY = 'novawallet.db.v3'
 const SESSION = 'novawallet.session'
@@ -96,6 +96,9 @@ interface Ctx {
   updateUserPayMethod: (id: string, type: 'bank' | 'crypto', label: string, detail: string) => void
   removeUserPayMethod: (id: string) => void
   requestPasswordOtp: (email: string) => { error: string | null; otp: string | null }
+  requestEmailOtp: (email: string) => Promise<{ error: string | null; emailed: boolean }>
+  verifyEmailOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
+  resetPasswordByGrant: (email: string, grant: string, newPassword: string) => Promise<string | null>
   verifyPasswordOtp: (email: string, otp: string) => string | null
   resetPasswordWithOtp: (email: string, otp: string, newPassword: string) => string | null
   register: (p: { name: string; username: string; email: string; phone: string; password: string; pin: string; referralCode?: string; turnstileToken?: string }) => Promise<string | null>
@@ -881,6 +884,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.passwordHash = hashSecret(newPassword); delete du.resetOtpHash; delete du.resetOtpExpires; notify(d, u.id, 'Password reset', 'Your password was reset using an email verification code. If this was not you, contact support immediately.', 'security') })
     return null
   }
+  // Server email-OTP flow (real delivery via Gmail SMTP on the Worker).
+  // requestEmailOtp reports emailed:false while SMTP is not configured —
+  // the UI then falls back to the local demo functions above, unchanged.
+  const requestEmailOtp: Ctx['requestEmailOtp'] = async (email) => {
+    try {
+      const r = await publicPost('/v1/password/request-otp', { email: email.trim().toLowerCase() })
+      return { error: null, emailed: !!r.emailed }
+    } catch (e: any) {
+      if (e instanceof TypeError) return { error: null, emailed: false } // API unreachable — demo fallback
+      return { error: e.message || 'Could not send the code.', emailed: false }
+    }
+  }
+  const verifyEmailOtp: Ctx['verifyEmailOtp'] = async (email, code) => {
+    try {
+      const r = await publicPost('/v1/password/verify-otp', { email: email.trim().toLowerCase(), code })
+      return { error: null, grant: r.grant as string }
+    } catch (e: any) {
+      return { error: e.message || 'Could not verify the code.', grant: null }
+    }
+  }
+  const resetPasswordByGrant: Ctx['resetPasswordByGrant'] = async (email, grant, newPassword) => {
+    try {
+      await publicPost('/v1/password/reset', { email: email.trim().toLowerCase(), grant, newPassword })
+    } catch (e: any) {
+      if (e.message === 'not_configured') return 'Email password reset is not fully set up yet. Please use the PIN method, or contact support.'
+      return e.message || 'Password reset failed.'
+    }
+    // Keep this device's local copy in sync (login also accepts the local
+    // hash for migrated accounts) and clear any local lockout.
+    const em = email.trim().toLowerCase()
+    const u = dbRef.current.users.find(x => x.email === em)
+    if (u) {
+      recordSuccess(u.id)
+      mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.passwordHash = hashSecret(newPassword); delete du.resetOtpHash; delete du.resetOtpExpires })
+    }
+    return null
+  }
   // The user's OWN linked payment methods (their bank account / crypto wallet),
   // managed from Profile → Payment methods. Server-backed: every change is
   // saved to D1 via the API and comes back in /v1/state, so the list syncs
@@ -1581,7 +1621,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, setUserLoanLimit,
-    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
+    locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }
   return (
     <AppCtx.Provider value={value}>

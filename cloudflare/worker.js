@@ -1,3 +1,5 @@
+import { connect } from "cloudflare:sockets";
+
 // NovaWallet API — Cloudflare Worker (v2, 2026-11-21)
 //
 // Architecture: Firebase Auth owns identity; this Worker is the only door
@@ -2013,6 +2015,196 @@ async function handleAdminClearLocked(request, env, auth, body) {
 
 // ---- Router -------------------------------------------------------------------
 
+// ---------- Email delivery (Gmail SMTP) + email-OTP password reset ----------
+// Secrets (Worker dashboard → Settings → Variables and Secrets):
+//   SMTP_USER  the Gmail address that sends (e.g. solution.home.bd@gmail.com)
+//   SMTP_PASS  a Gmail App Password for that account (needs 2-Step Verification)
+//   FIREBASE_SA  the Firebase service-account JSON (lets the reset step set
+//              the user's real Firebase password after the OTP verifies)
+// Until SMTP_USER/SMTP_PASS exist, request-otp reports emailed:false and the
+// app keeps its on-screen demo flow — nothing breaks during setup.
+function b64Utf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function smtpReplies(socket) {
+  const reader = socket.readable.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  const fill = async (timeoutMs) => {
+    let timer;
+    try {
+      const res = await Promise.race([reader.read(), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("smtp_timeout")), timeoutMs); })]);
+      if (res.done) throw new Error("smtp_closed");
+      buf += dec.decode(res.value, { stream: true });
+    } finally { clearTimeout(timer); }
+  };
+  const reply = async (timeoutMs = 15000) => {
+    const lines = [];
+    for (;;) {
+      let idx = buf.indexOf("\r\n");
+      while (idx === -1) { await fill(timeoutMs); idx = buf.indexOf("\r\n"); }
+      const line = buf.slice(0, idx); buf = buf.slice(idx + 2); lines.push(line);
+      if (/^\d{3}( |$)/.test(line)) return { code: Number(line.slice(0, 3)), text: lines.join(" ") };
+    }
+  };
+  return { reply };
+}
+async function sendEmail(env, { to, subject, text }) {
+  const user = env.SMTP_USER, pass = env.SMTP_PASS;
+  if (!user || !pass) return { sent: false, reason: "not_configured" };
+  let socket;
+  try {
+    socket = connect({ hostname: "smtp.gmail.com", port: 465 }, { secureTransport: "on", allowHalfOpen: false });
+    await socket.opened;
+    const writer = socket.writable.getWriter();
+    const enc = new TextEncoder();
+    const { reply } = smtpReplies(socket);
+    const send = (line) => writer.write(enc.encode(line + "\r\n"));
+    const expect = async (codes) => { const r = await reply(); if (!codes.includes(r.code)) throw new Error("SMTP " + r.code + " " + r.text.slice(0, 120)); };
+    await expect([220]);
+    await send("EHLO novawallet.pp.ua"); await expect([250]);
+    await send("AUTH LOGIN"); await expect([334]);
+    await send(btoa(user)); await expect([334]);
+    await send(btoa(pass)); await expect([235]);
+    await send("MAIL FROM:<" + user + ">"); await expect([250]);
+    await send("RCPT TO:<" + to + ">"); await expect([250, 251]);
+    await send("DATA"); await expect([354]);
+    const body64 = b64Utf8(text).replace(/(.{76})/g, "$1\r\n");
+    const msg = [
+      "From: \"NovaWallet\" <" + user + ">",
+      "To: " + to,
+      "Subject: " + subject,
+      "Date: " + new Date().toUTCString(),
+      "Message-ID: <" + crypto.randomUUID() + "@novawallet.pp.ua>",
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      body64,
+    ].join("\r\n");
+    await writer.write(enc.encode(msg + "\r\n.\r\n")); await expect([250]);
+    try { await send("QUIT"); } catch { /* closing anyway */ }
+    return { sent: true };
+  } catch (e) {
+    return { sent: false, reason: String(e?.message || e) };
+  } finally {
+    try { socket?.close(); } catch { /* ignore */ }
+  }
+}
+let saTokenCache = { token: null, exp: 0 };
+function pemToDer(pem) {
+  const b64 = String(pem).replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s+/g, "");
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+async function firebaseAdminToken(env) {
+  if (saTokenCache.token && Date.now() < saTokenCache.exp - 60000) return saTokenCache.token;
+  const sa = JSON.parse(env.FIREBASE_SA);
+  const now = Math.floor(Date.now() / 1000);
+  const te = new TextEncoder();
+  const head = b64uEnc(te.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+  const claim = b64uEnc(te.encode(JSON.stringify({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/identitytoolkit", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 })));
+  const key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, te.encode(head + "." + claim));
+  const jwt = head + "." + claim + "." + b64uEnc(new Uint8Array(sig));
+  const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
+  const j = await r.json().catch(() => ({}));
+  if (!j.access_token) throw new Error("service_account_token_failed");
+  saTokenCache = { token: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
+  return j.access_token;
+}
+const OTP_ERR = {
+  none: "No code was requested for this email yet. Tap \u201CSend code\u201D first.",
+  expired: "That code has expired. Please request a new one.",
+  attempts: "Too many incorrect attempts. Please request a new code.",
+  wrong: "Incorrect code \u2014 please check and try again.",
+};
+async function handlePasswordRequestOtp(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(request, { error: "Enter a valid email address." }, 400);
+  const smtpReady = !!(env.SMTP_USER && env.SMTP_PASS);
+  const user = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (user) {
+    const now = Date.now();
+    const prev = await db.prepare("SELECT last_sent_at FROM password_otps WHERE email = ?").bind(email).first();
+    if (!prev || now - Number(prev.last_sent_at || 0) > 60000) {
+      const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+      const codeHash = await sha256Hex(email + ":" + code);
+      await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
+        .bind(email, user.id, codeHash, now + 10 * 60000, now).run();
+      if (smtpReady) {
+        const r = await sendEmail(env, {
+          to: email,
+          subject: "Your NovaWallet verification code",
+          text: "Hello,\n\nYour NovaWallet password reset code is: " + code + "\n\nIt expires in 10 minutes. Enter it in the app to reset your password.\n\nIf you didn't request this, you can ignore this email \u2014 your password stays unchanged.\n\n\u2014 NovaWallet\nsupport@novawallet.pp.ua",
+        });
+        if (!r.sent) { try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(user.id, ("smtp_failed: " + r.reason).slice(0, 500)).run(); } catch { /* ignore */ } }
+      }
+    }
+  }
+  return json(request, { ok: true, emailed: smtpReady });
+}
+async function handlePasswordVerifyOtp(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  const code = String(body.code || "").trim();
+  const row = await db.prepare("SELECT * FROM password_otps WHERE email = ?").bind(email).first();
+  if (!row || !row.code_hash) return json(request, { error: OTP_ERR.none }, 400);
+  if (Date.now() > Number(row.expires_at)) return json(request, { error: OTP_ERR.expired }, 400);
+  if (Number(row.attempts) >= 5) return json(request, { error: OTP_ERR.attempts }, 400);
+  const h = await sha256Hex(email + ":" + code);
+  if (h !== row.code_hash) {
+    await db.prepare("UPDATE password_otps SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
+    return json(request, { error: OTP_ERR.wrong }, 400);
+  }
+  const grantBytes = crypto.getRandomValues(new Uint8Array(32));
+  const grant = [...grantBytes].map(b => b.toString(16).padStart(2, "0")).join("");
+  await db.prepare("UPDATE password_otps SET code_hash = NULL, grant_hash = ?, grant_expires = ? WHERE email = ?")
+    .bind(await sha256Hex(grant), Date.now() + 10 * 60000, email).run();
+  return json(request, { ok: true, grant });
+}
+async function handlePasswordResetByOtp(request, env, body) {
+  const db = env.DB;
+  const email = String(body.email || "").trim().toLowerCase();
+  const grant = String(body.grant || "");
+  const newPassword = String(body.newPassword || "");
+  if (newPassword.length < 6) return json(request, { error: "Password must be at least 6 characters." }, 400);
+  const row = await db.prepare("SELECT * FROM password_otps WHERE email = ?").bind(email).first();
+  if (!row || !row.grant_hash || Date.now() > Number(row.grant_expires || 0) || (await sha256Hex(grant)) !== row.grant_hash) {
+    return json(request, { error: "This reset session has expired. Please verify a new code." }, 400);
+  }
+  if (!env.FIREBASE_SA) return json(request, { error: "not_configured" }, 503);
+  try {
+    const token = await firebaseAdminToken(env);
+    const r = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ localId: row.user_id, password: newPassword, returnSecureToken: false }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error("accounts_update_" + (j?.error?.message || r.status));
+  } catch (e) {
+    try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(row.user_id, ("password_reset_failed: " + String(e?.message || e)).slice(0, 500)).run(); } catch { /* ignore */ }
+    return json(request, { error: "Password reset failed on the server. Please try again." }, 500);
+  }
+  await db.batch([
+    db.prepare("DELETE FROM password_otps WHERE email = ?").bind(email),
+    db.prepare("DELETE FROM user_sessions WHERE user_id = ?").bind(row.user_id),
+  ]);
+  await notifyServer(db, row.user_id, "security", "Password reset", "Your password was reset using an email verification code. If this was not you, contact support immediately.", null);
+  return json(request, { ok: true });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -2035,6 +2227,17 @@ export default {
           .bind(a?.uid ?? null, String(b.message || "").slice(0, 500), String(b.stack || "").slice(0, 2000), String(b.url || "").slice(0, 300)).run();
       } catch { /* ignore */ }
       return json(request, { ok: true });
+    }
+
+    // Email-OTP password reset (public: the user is logged out). The OTP
+    // itself is generated, hashed and verified server-side; the email goes
+    // out over Gmail SMTP when the SMTP secrets are configured.
+    if (path.startsWith("/v1/password/") && request.method === "POST") {
+      let b = {};
+      try { b = await request.json(); } catch { /* ignore */ }
+      if (path === "/v1/password/request-otp") return await handlePasswordRequestOtp(request, env, b);
+      if (path === "/v1/password/verify-otp") return await handlePasswordVerifyOtp(request, env, b);
+      if (path === "/v1/password/reset") return await handlePasswordResetByOtp(request, env, b);
     }
 
     if (!path.startsWith("/v1/")) return json(request, { error: "not_found" }, 404);

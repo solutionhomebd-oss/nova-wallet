@@ -38,6 +38,13 @@ async function call(path: string, init: RequestInit): Promise<any> {
   return data
 }
 
+export async function publicPost(path: string, body: unknown): Promise<any> {
+  const res = await fetch(API_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || ('Server error (' + res.status + ')'))
+  return data
+}
+
 export const apiGet = (path: string) => call(path, { method: 'GET' })
 export const apiPost = (path: string, body: unknown) => call(path, { method: 'POST', body: JSON.stringify(body) })
 

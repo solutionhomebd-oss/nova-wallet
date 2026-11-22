@@ -1610,7 +1610,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const replyTicket: Ctx['replyTicket'] = async (ticketId, text, as) => {
     if (!user || !text.trim()) return
     const tkNow = dbRef.current.tickets.find(x => x.id === ticketId)
-    if (!tkNow || tkNow.status === 'resolved') return
+    if (!tkNow) return
+    // A resolved chat still accepts a 👍/👎 rating reply when it asked.
+    const isRating = tkNow.status === 'resolved' && !!tkNow.ratingAsked && !tkNow.rating && ['👍', '👎'].includes(text.trim())
+    if (tkNow.status === 'resolved' && !isRating) return
     // Double-fire guard: an identical send already in flight (rapid double
     // tap, Enter + click) is dropped instead of posting a second copy.
     const sendKey = ticketId + '|' + as + '|' + text.trim()
@@ -1622,7 +1625,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // the pending copy survives state pulls that raced ahead of the send.
     const tempId = uid('MSG')
     mutate(d => {
-      const tk = d.tickets.find(x => x.id === ticketId); if (!tk || tk.status === 'resolved') return
+      const tk = d.tickets.find(x => x.id === ticketId); if (!tk) return
+      if (tk.status === 'resolved' && !(tk.ratingAsked && !tk.rating && ['👍', '👎'].includes(text.trim()))) return
       tk.messages.push({ id: tempId, from: as, text: text.trim(), at: nowISO(), pending: true })
       tk.updatedAt = nowISO()
       if (as === 'admin' && tk.status === 'pending') tk.status = 'processing'

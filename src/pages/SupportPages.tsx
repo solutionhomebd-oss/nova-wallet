@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, KeyRound, Loader2, Mail, MoreVertical, Send, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, KeyRound, Loader2, Mail, MoreVertical, Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { useApp } from '../lib/store'
+import { apiGet, apiPost } from '../lib/api'
 import { Avatar, Badge, Btn, Card, Empty, Input, MsgTicks } from '../components/ui'
 import { fmtDateTime } from '../lib/utils'
 import type { SupportTicket } from '../lib/types'
@@ -162,7 +163,7 @@ export function SupportListPage() {
 /* ---------------- User: full-page chat ---------------- */
 
 export function SupportChatPage() {
-  const { db, user, markTicketRead, t } = useApp()
+  const { db, user, markTicketRead, replyTicket, t } = useApp()
   const navigate = useNavigate()
   const { ticketId } = useParams()
   const tk = user ? db.tickets.find(x => x.id === ticketId && x.userId === user.id) : undefined
@@ -186,7 +187,16 @@ export function SupportChatPage() {
             <ChatMessages tk={tk} selfFrom="user" otherName={t('chat_team')} />
           </div>
           {tk.status === 'resolved' ? (
-            <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3 shrink-0">{t('chat_closed_note')}</p>
+            <div className="shrink-0">
+              {tk.ratingAsked && !tk.rating ? (
+                <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-500/10 rounded-2xl px-3.5 py-3 mb-2">
+                  <p className="flex-1 text-xs font-bold">How was your support experience?</p>
+                  <button onClick={() => void replyTicket(tk.id, '👍', 'user')} className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-lg">👍</button>
+                  <button onClick={() => void replyTicket(tk.id, '👎', 'user')} className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-lg">👎</button>
+                </div>
+              ) : null}
+              <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3">{t('chat_closed_note')}</p>
+            </div>
           ) : (
             <div className="flex gap-2 shrink-0">
               <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder={t('chat_placeholder')} className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
@@ -202,7 +212,7 @@ export function SupportChatPage() {
 /* ---------------- Admin: full-page chat with options panel ---------------- */
 
 export function AdminSupportChatPage() {
-  const { db, user, markTicketRead, resolveTicket, deleteTicket, startChatVerify, setChatVerify, sendChatPin, toast } = useApp()
+  const { db, user, markTicketRead, resolveTicket, deleteTicket, startChatVerify, setChatVerify, sendChatPin, toast, walletOf, fmtMoney } = useApp()
   const navigate = useNavigate()
   const { ticketId } = useParams()
   const tk = db.tickets.find(x => x.id === ticketId)
@@ -213,6 +223,26 @@ export function AdminSupportChatPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuDelArm, setMenuDelArm] = useState(false)
   const [menuBusy, setMenuBusy] = useState('')
+  const [tplOpen, setTplOpen] = useState(false)
+  const [canned, setCanned] = useState<{ id: string; title: string; text: string }[] | null>(null)
+  const [tplForm, setTplForm] = useState<{ id?: string; title: string; text: string } | null>(null)
+  const [tplBusy, setTplBusy] = useState(false)
+  useEffect(() => {
+    if (!tplOpen || canned !== null) return
+    apiGet('/v1/admin/overview').then((r: any) => { const ov = r.overview ?? r; setCanned(ov.cannedReplies ?? []) }).catch(() => setCanned([]))
+  }, [tplOpen, canned])
+  const saveCanned = async () => {
+    if (!tplForm || tplBusy) return
+    if (!tplForm.title.trim() || !tplForm.text.trim()) return toast({ kind: 'error', title: 'Write a title and the reply text' })
+    setTplBusy(true)
+    try { const r: any = await apiPost('/v1/admin/canned/save', { item: tplForm }); const ov = r.overview ?? r; setCanned(ov.cannedReplies ?? []); setTplForm(null); toast({ kind: 'success', title: 'Template saved' }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    setTplBusy(false)
+  }
+  const delCanned = async (id: string) => {
+    try { const r: any = await apiPost('/v1/admin/canned/delete', { id }); const ov = r.overview ?? r; setCanned(ov.cannedReplies ?? []) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+  }
   useEffect(() => { if (ticketId) void markTicketRead(ticketId, true) }, [ticketId])
   useEffect(() => { setDelArm(false); setMenuOpen(false); setMenuDelArm(false) }, [ticketId])
   useEffect(() => {
@@ -298,6 +328,13 @@ export function AdminSupportChatPage() {
           </div>
         )}
       </div>
+      {tk && tku && (
+        <div className="flex gap-1.5 flex-wrap mb-3 shrink-0">
+          {['Route: ' + (tk.route ?? 'general'), 'Level ' + tku.level, 'KYC: ' + tku.kyc, 'Balance: ' + fmtMoney(walletOf(tku.id)?.available ?? 0), db.tickets.filter(x => x.userId === tku.id && x.status !== 'resolved').length + ' open chat(s)'].map(chip => (
+            <span key={chip} className="px-2.5 py-1 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-500 capitalize">{chip}</span>
+          ))}
+        </div>
+      )}
       {!tk ? (
         <Card className="p-6"><Empty title="Chat not available" body="This conversation may have been deleted." /></Card>
       ) : (
@@ -308,9 +345,62 @@ export function AdminSupportChatPage() {
           {tk.status === 'resolved' ? (
             <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3 shrink-0">This chat is resolved and closed. The customer must open a new chat for further help.</p>
           ) : (
-            <div className="flex gap-2 shrink-0">
-              <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder="Type your reply…" className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
-              <Btn className="!px-5 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : 'Send'}</Btn>
+            <div className="shrink-0">
+              {(() => {
+                const lastUser = [...tk.messages].reverse().find(m => m.from === 'user')?.text.toLowerCase() ?? ''
+                const sug: string[] = []
+                if (lastUser.includes('pin')) sug.push("I've sent your current PIN in this chat — it's visible only to you. Please keep it private and never share it with anyone.")
+                if (lastUser.includes('otp') || lastUser.includes('code') || lastUser.includes('verify')) sug.push("For your security, I've sent a verification code to your email — please send it here in the chat.")
+                if (lastUser.includes('deposit') || lastUser.includes('add money')) sug.push("Please share your deposit details: the amount, the payment method, and the transaction ID.")
+                if (lastUser.includes('withdraw') || lastUser.includes('cash out') || lastUser.includes('cashout')) sug.push("Please share the withdrawal amount and the TXN ID so I can check its status for you.")
+                if (lastUser.includes('loan')) sug.push("Please share your loan details and tell me what you need help with — application, repayment or closing.")
+                if (lastUser.includes('kyc')) sug.push("You can complete KYC from Profile → KYC verification. If it was rejected, please re-upload a clear photo of your document.")
+                if (tk.subject === 'Transaction Problem') sug.push("Please share the transaction ID (it starts with TXN-) so I can check it for you right away.")
+                sug.push("Thanks for reaching out — I'm checking this for you now.")
+                sug.push("This should be fixed now. Please fully close and reopen the app, then try again.")
+                return (
+                  <div className="flex gap-1.5 flex-wrap mb-2">
+                    {sug.slice(0, 3).map(x => (
+                      <button key={x} onClick={() => setText(x)} title={x} className="max-w-full px-3 py-1.5 rounded-full bg-violet-50 dark:bg-violet-500/10 border border-violet-200/70 dark:border-violet-500/30 text-[11px] font-bold text-violet-700 dark:text-violet-300 truncate">✨ {x}</button>
+                    ))}
+                  </div>
+                )
+              })()}
+              <div className="flex gap-2">
+                <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder="Type your reply…" className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
+                <button onClick={() => setTplOpen(o => !o)} title="Quick replies" className={`shrink-0 w-11 rounded-2xl border flex items-center justify-center ${tplOpen ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-500'}`}><BookOpen size={17} /></button>
+                <Btn className="!px-5 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : 'Send'}</Btn>
+              </div>
+              {tplOpen && (
+                <div className="mt-2 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3.5 max-h-72 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="font-extrabold text-sm">Quick replies</p>
+                    <button onClick={() => setTplForm({ title: '', text: '' })} className="text-xs font-bold text-violet-600">+ New template</button>
+                  </div>
+                  {canned === null ? <p className="text-xs text-slate-400 flex items-center gap-2 py-2"><Loader2 size={13} className="animate-spin" /> Loading…</p>
+                    : canned.length === 0 ? <p className="text-xs text-slate-400 py-2">No templates yet — create your first one.</p>
+                    : canned.map(c => (
+                      <div key={c.id} className="flex items-start gap-2 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                        <button className="flex-1 min-w-0 text-left" onClick={() => setText(c.text)}>
+                          <span className="block font-bold text-xs">{c.title}</span>
+                          <span className="block text-xs text-slate-400 truncate">{c.text}</span>
+                        </button>
+                        <button onClick={() => setTplForm({ id: c.id, title: c.title, text: c.text })} className="text-[11px] font-bold text-slate-400 shrink-0">Edit</button>
+                        <button onClick={() => void delCanned(c.id)} className="text-[11px] font-bold text-rose-500 shrink-0">Delete</button>
+                      </div>
+                    ))}
+                  {tplForm && (
+                    <div className="mt-3 space-y-2">
+                      <input value={tplForm.title} onChange={e => setTplForm(f => f && ({ ...f, title: e.target.value }))} placeholder="Template title" className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm font-medium outline-none focus:border-violet-400" />
+                      <textarea value={tplForm.text} onChange={e => setTplForm(f => f && ({ ...f, text: e.target.value }))} placeholder="Reply text" rows={3} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm font-medium outline-none focus:border-violet-400" />
+                      <div className="flex items-center gap-3">
+                        <Btn className="!py-2 !px-4" disabled={tplBusy} onClick={saveCanned}>{tplBusy ? <Loader2 size={14} className="animate-spin" /> : 'Save template'}</Btn>
+                        <button onClick={() => setTplForm(null)} className="text-xs font-bold text-slate-400">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>

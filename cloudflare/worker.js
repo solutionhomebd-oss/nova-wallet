@@ -506,6 +506,7 @@ async function loadOverview(db) {
     errors: errRows.results.map((e) => ({ id: e.id, userId: e.user_id, message: e.message, url: e.url, createdAt: isoOf(e.created_at) })),
     audit: auditRows.results.map((a) => ({ id: String(a.id), actor: a.actor, action: a.action, detail: a.detail, createdAt: isoOf(a.created_at) })),
     emailLog: emailRows.results.map((e) => ({ id: e.id, to: e.to_email, kind: e.kind, subject: e.subject, status: e.status, error: e.error || undefined, createdAt: new Date(Number(e.created_at)).toISOString() })),
+    cannedReplies: (await getSettingKey(db, "canned_replies", null)) || DEFAULT_CANNED,
   };
 }
 
@@ -1208,7 +1209,7 @@ async function loadTickets(db, uid, stampSide) {
   for (const t of rows.results) {
     const msgs = await db.prepare("SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC").bind(t.id).all();
     out.push({
-      id: t.id, userId: t.user_id, subject: t.subject, status: t.status, verifyStatus: t.verify_status || null,
+      id: t.id, userId: t.user_id, subject: t.subject, status: t.status, verifyStatus: t.verify_status || null, route: t.route || routeForSubject(t.subject), rating: t.rating || null, ratingAsked: !!t.rating_asked,
       createdAt: isoOf(t.created_at), updatedAt: isoOf(t.updated_at || t.created_at),
       userReadAt: t.user_read_at ? isoOf(t.user_read_at) : null, adminReadAt: t.admin_read_at ? isoOf(t.admin_read_at) : null,
       userFetchedAt: t.user_fetched_at ? isoOf(t.user_fetched_at) : null, adminFetchedAt: t.admin_fetched_at ? isoOf(t.admin_fetched_at) : null,
@@ -1243,9 +1244,18 @@ async function notifyServer(db, userId, kind, title, body, link) {
   } catch { /* notifications never block the money path */ }
   await sendPushToUser(db, userId, title, body, link || "/");
 }
-async function notifyAdminsServer(db, kind, title, body, link) {
-  const rows = await db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
-  for (const r of rows.results) await notifyServer(db, r.id, kind, title, body, link);
+async function notifyAdminsServer(db, kind, title, body, link, routeScope) {
+  const rows = await db.prepare("SELECT id, admin_scope FROM users WHERE role = 'admin'").all();
+  for (const r of rows.results) {
+    // Subject routing: full admins always get it; scoped admins only get
+    // tickets routed to their scope (security tickets go to full admins).
+    if (routeScope && r.admin_scope) {
+      if (routeScope === "finance" && r.admin_scope !== "finance") continue;
+      if ((routeScope === "support" || routeScope === "general") && r.admin_scope !== "support") continue;
+      if (routeScope === "security") continue;
+    }
+    await notifyServer(db, r.id, kind, title, body, link);
+  }
 }
 async function auditLog(db, auth, action, detail) {
   try {
@@ -1384,18 +1394,48 @@ async function handleProfileUpdate(request, env, auth, body) {
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
 
+const ROUTE_BY_SUBJECT = {
+  "Deposit / Add Money": "finance", "Withdrawal / Cash Out": "finance", "Send Money / Transfer": "finance",
+  "Transaction Problem": "finance", "Fees & Limits": "finance", "Crypto Buy, Sell & Swap": "finance", "Loan": "finance",
+  "Security Concern": "security",
+  "KYC & Verification": "support", "Account & Login": "support", "Level Upgrade": "support",
+};
+function routeForSubject(subject) { return ROUTE_BY_SUBJECT[subject] || "general"; }
+
+const DEFAULT_CANNED = [
+  { id: "cr-txn", title: "Ask for TXN ID", text: "Please share the transaction ID (it starts with TXN-) so I can check it for you right away." },
+  { id: "cr-kyc", title: "Ask for KYC", text: "Please complete your KYC verification first (Profile → KYC verification) — after that we can proceed with your request." },
+  { id: "cr-review", title: "Under review", text: "Your request is under review. Please allow up to 24 hours — we will update you here as soon as it is done." },
+  { id: "cr-more", title: "Ask for details", text: "Could you tell me a bit more about the problem? When did it happen, and what exactly did you see on screen?" },
+  { id: "cr-fixed", title: "Fixed — retry", text: "This should be fixed now. Please fully close and reopen the app, then try again — and let me know if it works." },
+  { id: "cr-thanks", title: "Thank you", text: "Thank you for your patience 🙏 Is there anything else I can help you with?" },
+];
+
 async function handleTicketCreate(request, env, auth, body) {
   const db = env.DB;
   const subject = String(body.subject || "").trim().slice(0, 120);
   const message = String(body.message || "").trim().slice(0, 2000);
   if (!subject || !message) return json(request, { error: "Subject and message are required." }, 400);
+  // Spam guards: no links in the first message, max 3 open chats, max 5
+  // new chats per day per user.
+  if (/https?:\/\/|www\./i.test(message)) return json(request, { error: "Please don't include links in your first message — describe the problem in words and our team will help." }, 400);
+  const openCount = await db.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE user_id = ? AND status != 'resolved'").bind(auth.uid).first();
+  if (Number(openCount?.n || 0) >= 3) return json(request, { error: "You already have 3 open support chats. Please continue in one of those, or wait until one is resolved." }, 400);
+  const todayCount = await db.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE user_id = ? AND created_at >= datetime('now', '-1 day')").bind(auth.uid).first();
+  if (Number(todayCount?.n || 0) >= 5) return json(request, { error: "You've opened several chats today — please give our team time to reply in your existing chats." }, 400);
+  const route = routeForSubject(subject);
   const id = pubId("TKT");
-  await db.prepare("INSERT INTO support_tickets (id, user_id, subject, message, status, updated_at, user_read_at, user_fetched_at) VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
-    .bind(id, auth.uid, subject, message).run();
+  await db.prepare("INSERT INTO support_tickets (id, user_id, subject, message, status, route, updated_at, user_read_at, user_fetched_at) VALUES (?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+    .bind(id, auth.uid, subject, message, route).run();
   await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'user', ?)")
     .bind(pubId("MSG"), id, message).run();
+  await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)")
+    .bind(pubId("MSG"), id, "👋 Thanks for contacting NovaWallet Support! We've received your message — our team usually replies within 24 hours. For your safety: our team will never ask for your password.").run();
   const me = await getUserRow(db, auth.uid);
-  await notifyAdminsServer(db, "support", "New support chat", (me?.username || "A user") + " opened a support chat: " + subject, "/admin?tab=support");
+  await notifyAdminsServer(db, "support", "New support chat", (me?.username || "A user") + " opened a support chat: " + subject, "/admin?tab=support", route);
+  if (route === "security") {
+    await sendAndLog(env, db, { userId: auth.uid, to: "solution.home.bd@gmail.com", kind: "alert", subject: "🚨 New SECURITY support ticket — " + subject, text: "A user opened a security support chat.\n\nUser: " + (me?.username || "") + " (" + (me?.email || "") + ")\nSubject: " + subject + "\nMessage: " + message + "\n\nOpen the admin panel → Support to reply.", ip: null });
+  }
   return json(request, { ok: true, ticketId: id, state: await loadState(db, auth.uid) });
 }
 
@@ -1412,7 +1452,25 @@ async function handleTicketReply(request, env, auth, body) {
   const asAdmin = auth.role === "admin" && (tk.user_id !== auth.uid || body.asAdmin === true);
   if (!asAdmin && tk.user_id !== auth.uid) return json(request, { error: "Not your ticket." }, 403);
   if (asAdmin && !scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
-  if (tk.status === "resolved") return json(request, { error: "This chat is resolved and closed." }, 400);
+  // Rating capture: on a resolved chat that asked for a rating, a 👍/👎
+  // reply from the user is stored as the rating instead of an error.
+  if (tk.status === "resolved") {
+    const ratingVal = text === "👍" || /^good$/i.test(text) ? "good" : text === "👎" || /^bad$/i.test(text) ? "bad" : null;
+    if (!asAdmin && tk.rating_asked && !tk.rating && ratingVal) {
+      await db.prepare("INSERT OR IGNORE INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'user', ?)").bind(/^MSG-[A-Za-z0-9-]{4,40}$/.test(String(body.clientId || "")) ? String(body.clientId) : pubId("MSG"), ticketId, text).run();
+      await db.prepare("UPDATE support_tickets SET rating = ? WHERE id = ?").bind(ratingVal, ticketId).run();
+      await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', '🙏 Thank you for your feedback!')").bind(pubId("MSG"), ticketId).run();
+      return json(request, { ok: true, tickets: await loadTickets(db, auth.uid) });
+    }
+    return json(request, { error: "This chat is resolved and closed." }, 400);
+  }
+  // Burst + duplicate guards for user messages.
+  if (!asAdmin) {
+    const burst = await db.prepare("SELECT COUNT(*) AS n FROM ticket_messages WHERE ticket_id = ? AND sender = 'user' AND created_at >= datetime('now', '-10 minutes')").bind(ticketId).first();
+    if (Number(burst?.n || 0) >= 30) return json(request, { error: "You're sending messages too quickly — please wait a moment." }, 400);
+    const lastTwo = await db.prepare("SELECT text FROM ticket_messages WHERE ticket_id = ? AND sender = 'user' ORDER BY created_at DESC, rowid DESC LIMIT 2").bind(ticketId).all();
+    if (lastTwo.results.length === 2 && lastTwo.results.every((r) => r.text === text)) return json(request, { error: "You already sent that message." }, 400);
+  }
   // Idempotent send: the client generates the message id and reuses it on
   // retries / double-fires, so the same message can never be stored twice.
   const cid = String(body.clientId || "");
@@ -1424,7 +1482,19 @@ async function handleTicketReply(request, env, auth, body) {
     await db.prepare("UPDATE support_tickets SET updated_at = CURRENT_TIMESTAMP, status = ?, " + (asAdmin ? "admin_read_at" : "user_read_at") + " = CURRENT_TIMESTAMP, " + (asAdmin ? "admin_fetched_at" : "user_fetched_at") + " = CURRENT_TIMESTAMP WHERE id = ?")
       .bind(asAdmin && tk.status === "pending" ? "processing" : tk.status, ticketId).run();
     if (asAdmin && tk.user_id !== auth.uid) await notifyServer(db, tk.user_id, "support", "Support replied", "The support team replied to your chat: " + tk.subject, "/support");
-    if (!asAdmin) await notifyAdminsServer(db, "support", "Support chat reply", "New reply in: " + tk.subject, "/admin?tab=support");
+    if (!asAdmin) await notifyAdminsServer(db, "support", "Support chat reply", "New reply in: " + tk.subject, "/admin?tab=support", tk.route || undefined);
+    // TXN auto-lookup: when the user mentions one of their transaction
+    // ids, post a system summary of that transaction into the chat.
+    if (!asAdmin) {
+      const mTx = text.match(/TXN-[A-Z0-9]{6,12}/i);
+      if (mTx) {
+        const txRow = await db.prepare("SELECT * FROM transactions WHERE public_id = ? AND (user_id = ? OR counterparty = ?)").bind(mTx[0].toUpperCase(), tk.user_id, tk.user_id).first();
+        if (txRow) {
+          const when = new Date(isoOf(txRow.created_at)).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+          await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)").bind(pubId("MSG"), ticketId, "🧾 " + txRow.public_id + " · " + txRow.category + " · ৳" + Math.abs(Number(txRow.amount)).toLocaleString("en-US") + " · " + txRow.status + " · " + when).run();
+        }
+      }
+    }
   }
   // Identity verification: while a verification is pending on this
   // ticket, a 6-digit message from the user is treated as their code
@@ -1455,6 +1525,70 @@ async function handleTicketReply(request, env, auth, body) {
   // long after the message itself had already landed.
   if (asAdmin) return json(request, { ok: true, tickets: await loadTickets(db, null) });
   return json(request, { ok: true, tickets: await loadTickets(db, auth.uid) });
+}
+
+async function supportSweep(db, env) {
+  const last = Number(await getSettingKey(db, "support_sweep_at", 0)) || 0;
+  if (Date.now() - last < 10 * 60000) return;
+  await setSettingKey(db, "support_sweep_at", Date.now());
+  const sysMsg = async (tid, msgText) => { await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)").bind(pubId("MSG"), tid, msgText).run(); };
+  // Idle warning at 3 days without any activity.
+  const warn = await db.prepare("SELECT id FROM support_tickets WHERE status IN ('pending', 'processing') AND idle_warned_at IS NULL AND COALESCE(updated_at, created_at) < datetime('now', '-3 days') LIMIT 20").all();
+  for (const r of warn.results) {
+    await sysMsg(r.id, "⏰ This chat has been inactive for 3 days. If there's no reply within 24 hours it will be closed automatically — just send a message to keep it open.");
+    await db.prepare("UPDATE support_tickets SET idle_warned_at = CURRENT_TIMESTAMP WHERE id = ?").bind(r.id).run();
+  }
+  // Auto-close 24h after the warning if still inactive.
+  const close = await db.prepare("SELECT id, user_id, subject FROM support_tickets WHERE status IN ('pending', 'processing') AND idle_warned_at IS NOT NULL AND idle_warned_at < datetime('now', '-1 day') AND COALESCE(updated_at, created_at) <= idle_warned_at LIMIT 20").all();
+  for (const r of close.results) {
+    await db.prepare("UPDATE support_tickets SET status = 'resolved', rating_asked = 1 WHERE id = ?").bind(r.id).run();
+    await sysMsg(r.id, "This chat was closed automatically after 4 days without a reply. If you still need help, please start a new chat.");
+    await notifyServer(db, r.user_id, "support", "Support chat closed", "Your support chat \"" + r.subject + "\" was closed automatically after 4 days without a reply.", "/support");
+  }
+  // Last-message checks: SLA alert (user waiting 2h+) and follow-up
+  // nudge (admin replied, user silent for 24h).
+  const open = await db.prepare("SELECT id, user_id, subject, status, updated_at, sla_alerted_at, nudged_at FROM support_tickets WHERE status != 'resolved' LIMIT 100").all();
+  for (const t of open.results) {
+    const lastMsg = await db.prepare("SELECT sender, created_at FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(t.id).first();
+    if (!lastMsg) continue;
+    const lastAt = new Date(String(lastMsg.created_at).replace(" ", "T") + "Z").getTime();
+    const updatedAt = new Date(String(t.updated_at || "").replace(" ", "T") + "Z").getTime();
+    if (lastMsg.sender === "user" && Date.now() - lastAt > 2 * 3600000 && (!t.sla_alerted_at || new Date(String(t.sla_alerted_at).replace(" ", "T") + "Z").getTime() < updatedAt)) {
+      const u = await getUserRow(db, t.user_id);
+      await sendAndLog(env, db, { userId: t.user_id, to: "solution.home.bd@gmail.com", kind: "alert", subject: "⏰ Support chat waiting over 2 hours — " + t.subject, text: "A support chat has been waiting for a reply for over 2 hours.\n\nUser: " + (u?.username || "") + " (" + (u?.email || "") + ")\nSubject: " + t.subject + "\n\nOpen the admin panel → Support to reply.", ip: null });
+      await db.prepare("UPDATE support_tickets SET sla_alerted_at = CURRENT_TIMESTAMP WHERE id = ?").bind(t.id).run();
+    }
+    if (lastMsg.sender === "admin" && t.status === "processing" && Date.now() - lastAt > 24 * 3600000 && (!t.nudged_at || new Date(String(t.nudged_at).replace(" ", "T") + "Z").getTime() < updatedAt)) {
+      await sysMsg(t.id, "👋 Just checking in — do you still need help with this? Reply here and we'll continue right where we left off.");
+      await db.prepare("UPDATE support_tickets SET nudged_at = CURRENT_TIMESTAMP WHERE id = ?").bind(t.id).run();
+    }
+  }
+}
+
+async function handleAdminCannedSave(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+  const item = body.item || {};
+  const title = String(item.title || "").trim().slice(0, 60);
+  const text = String(item.text || "").trim().slice(0, 1000);
+  if (!title || !text) return json(request, { error: "A title and the reply text are required." }, 400);
+  const list = (await getSettingKey(db, "canned_replies", null)) || DEFAULT_CANNED.slice();
+  if (item.id && list.some((x) => x.id === item.id)) {
+    const ix = list.findIndex((x) => x.id === item.id);
+    list[ix] = { id: item.id, title, text };
+  } else {
+    list.push({ id: pubId("CR"), title, text });
+  }
+  await setSettingKey(db, "canned_replies", list);
+  return json(request, { ok: true, overview: await loadOverview(db) });
+}
+
+async function handleAdminCannedDelete(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+  const list = ((await getSettingKey(db, "canned_replies", null)) || DEFAULT_CANNED.slice()).filter((x) => x.id !== String(body.id || ""));
+  await setSettingKey(db, "canned_replies", list);
+  return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
 async function handleTicketVerifyStart(request, env, auth, body) {
@@ -1532,7 +1666,8 @@ async function handleTicketResolve(request, env, auth, body) {
   const ticketId = String(body.ticketId || "");
   const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
   if (!tk) return json(request, { error: "Ticket not found." }, 404);
-  await db.prepare("UPDATE support_tickets SET status = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+  await db.prepare("UPDATE support_tickets SET status = 'resolved', rating_asked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+  await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', '⭐ This chat was resolved. How was your support experience? Send 👍 or 👎 to rate it.')").bind(pubId("MSG"), ticketId).run();
   await notifyServer(db, tk.user_id, "support", "Support chat resolved", "Your support chat \"" + tk.subject + "\" was marked resolved and closed.", "/support");
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
@@ -2769,6 +2904,7 @@ export default {
     // carry neither), so admin checks read it fresh per request.
     const meRow = await getUserRow(env.DB, auth.uid);
     if (meRow) { auth.role = meRow.role; auth.status = meRow.status; auth.scope = meRow.admin_scope || (meRow.role === "admin" ? "full" : null); }
+    try { await supportSweep(env.DB, env); } catch { /* the sweep must never break a request */ }
 
     const bodyOf = async () => { try { return await request.json(); } catch { return {}; } };
 
@@ -2834,6 +2970,8 @@ export default {
           case "/v1/admin/tickets/verify-start": return await handleTicketVerifyStart(request, env, auth, body);
           case "/v1/admin/tickets/verify-set": return await handleTicketVerifySet(request, env, auth, body);
           case "/v1/admin/tickets/send-pin": return await handleTicketSendPin(request, env, auth, body);
+          case "/v1/admin/canned/save": return await handleAdminCannedSave(request, env, auth, body);
+          case "/v1/admin/canned/delete": return await handleAdminCannedDelete(request, env, auth, body);
           case "/v1/levels/request": return await handleLevelRequest(request, env, auth, body);
           case "/v1/email-prefs": return await handleEmailPrefs(request, env, auth, body);
           case "/v1/email-change/start": return await handleEmailChangeStart(request, env, auth);

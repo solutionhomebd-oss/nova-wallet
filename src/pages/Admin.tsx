@@ -1196,7 +1196,7 @@ function SupportChat() {
                     {last && <p className="text-xs text-slate-500 truncate mt-0.5">{last.from === 'admin' ? 'Support: ' : last.from === 'system' ? 'System: ' : ''}{last.text}</p>}
                     {last?.from === 'user' && (x.adminReadAt ?? '') < x.updatedAt && <span className="inline-block w-2 h-2 rounded-full bg-rose-500 ml-1.5 align-middle" />}
                   </div>
-                  <div className="text-right shrink-0"><Badge tone={SUP_TONE(x.status)}>{x.status}</Badge><p className="text-[10px] text-slate-400 mt-1">{fmtDateTime(x.updatedAt)}</p></div>
+                  <div className="text-right shrink-0"><Badge tone={SUP_TONE(x.status)}>{x.status}</Badge><p className="text-[10px] text-slate-400 mt-1">{fmtDateTime(x.updatedAt)}</p><p className="text-[10px] font-bold text-violet-500 mt-0.5 capitalize">{x.route ?? 'general'}{x.rating ? ' · ' + (x.rating === 'good' ? '👍' : '👎') : ''}</p></div>
                 </div>
               </Card>
             </button>

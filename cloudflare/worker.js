@@ -1212,7 +1212,7 @@ async function loadTickets(db, uid, stampSide) {
       createdAt: isoOf(t.created_at), updatedAt: isoOf(t.updated_at || t.created_at),
       userReadAt: t.user_read_at ? isoOf(t.user_read_at) : null, adminReadAt: t.admin_read_at ? isoOf(t.admin_read_at) : null,
       userFetchedAt: t.user_fetched_at ? isoOf(t.user_fetched_at) : null, adminFetchedAt: t.admin_fetched_at ? isoOf(t.admin_fetched_at) : null,
-      messages: msgs.results.map((m) => ({ id: m.id, from: m.sender, text: m.text, at: isoOf(m.created_at) })),
+      messages: msgs.results.map((m) => ({ id: m.id, from: m.sender, text: !uid && typeof m.text === "string" && m.text.startsWith("PINSECURE::") ? "PINSECURE::****" : m.text, at: isoOf(m.created_at) })),
     });
   }
   return out;
@@ -1471,6 +1471,44 @@ async function handleTicketVerifyStart(request, env, auth, body) {
     .bind(pubId("MSG"), ticketId, "🔐 For verify it's you: a 6-digit code was sent to the account email address. Please send that code here in this chat.").run();
   await sendUserEmail(env, db, tk.user_id, "security", "Support verification code — NovaWallet", "Verify it's you", ["Our support team asked to verify your identity during a support chat.", "Send this code in the chat — it expires in 10 minutes. Never share it anywhere else."], code);
   await auditLog(db, auth, "ticket.verify_start", ticketId + " · user " + tk.user_id);
+  return json(request, { ok: true, tickets: await loadTickets(db, null) });
+}
+
+async function handleTicketVerifySet(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+  const ticketId = String(body.ticketId || "");
+  const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
+  if (!tk) return json(request, { error: "Ticket not found." }, 404);
+  const verified = !!body.verified;
+  await db.prepare("UPDATE support_tickets SET verify_status = ?, verify_code_hash = NULL, verify_expires = NULL, verify_attempts = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(verified ? "verified" : null, ticketId).run();
+  await auditLog(db, auth, verified ? "ticket.verify_manual" : "ticket.unverify_manual", ticketId + " · user " + tk.user_id);
+  return json(request, { ok: true, tickets: await loadTickets(db, null) });
+}
+
+async function handleTicketSendPin(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+  const ticketId = String(body.ticketId || "");
+  const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
+  if (!tk) return json(request, { error: "Ticket not found." }, 404);
+  if (tk.status === "resolved") return json(request, { error: "This chat is resolved and closed." }, 400);
+  const u = await getUserRow(db, tk.user_id);
+  if (!u || !u.pin_hash) return json(request, { error: "This account has no PIN on record." }, 400);
+  // The PIN is 4 digits and the stored legacy hash is a fast FNV hash, so
+  // the current PIN is recovered by trying the whole 0000-9999 space.
+  let pin = null;
+  for (let i = 0; i <= 9999; i++) {
+    const cand = String(i).padStart(4, "0");
+    if (hashSecret(cand) === u.pin_hash) { pin = cand; break; }
+  }
+  if (!pin) return json(request, { error: "Could not recover this account's PIN." }, 400);
+  await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)")
+    .bind(pubId("MSG"), ticketId, "PINSECURE::" + pin).run();
+  await db.prepare("UPDATE support_tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+  await auditLog(db, auth, "ticket.send_pin", ticketId + " · user " + tk.user_id);
+  await notifyServer(db, tk.user_id, "support", "Support sent your PIN", "The support team sent your transaction PIN in your support chat.", "/support");
   return json(request, { ok: true, tickets: await loadTickets(db, null) });
 }
 
@@ -2794,6 +2832,8 @@ export default {
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
           case "/v1/admin/tickets/verify-start": return await handleTicketVerifyStart(request, env, auth, body);
+          case "/v1/admin/tickets/verify-set": return await handleTicketVerifySet(request, env, auth, body);
+          case "/v1/admin/tickets/send-pin": return await handleTicketSendPin(request, env, auth, body);
           case "/v1/levels/request": return await handleLevelRequest(request, env, auth, body);
           case "/v1/email-prefs": return await handleEmailPrefs(request, env, auth, body);
           case "/v1/email-change/start": return await handleEmailChangeStart(request, env, auth);

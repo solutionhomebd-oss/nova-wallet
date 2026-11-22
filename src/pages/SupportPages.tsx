@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, ChevronRight, Loader2, Send, ShieldCheck, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, KeyRound, Loader2, Mail, MoreVertical, Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { Avatar, Badge, Btn, Card, Empty, Input, MsgTicks } from '../components/ui'
 import { fmtDateTime } from '../lib/utils'
 import type { SupportTicket } from '../lib/types'
+
+// Fixed support subjects — users pick from this list only (no typing);
+// "Others" stays last, as the owner asked.
+export const SUPPORT_SUBJECTS = [
+  'Account & Login', 'KYC & Verification', 'Deposit / Add Money', 'Withdrawal / Cash Out',
+  'Send Money / Transfer', 'Crypto Buy, Sell & Swap', 'Loan', 'Earn, Staking & Rewards',
+  'Referral', 'Level Upgrade', 'Transaction Problem', 'Fees & Limits', 'Security Concern',
+  'App Problem / Bug', 'Feedback & Suggestion', 'Others',
+]
 
 const statusBadge = (st: string) => st === 'pending' ? <Badge tone="amber">Pending</Badge> : st === 'processing' ? <Badge tone="violet">Processing</Badge> : <Badge tone="green">Resolved</Badge>
 
@@ -16,6 +25,18 @@ function ChatMessages({ tk, selfFrom, otherName }: { tk: SupportTicket; selfFrom
   return (
     <>
       {tk.messages.map(m => {
+        if (m.from === 'system' && m.text.startsWith('PINSECURE::')) {
+          const pinVal = m.text.slice('PINSECURE::'.length)
+          return (
+            <div key={m.id} className="flex justify-center px-2">
+              <div className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
+                <p className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">{selfFrom === 'user' ? '🔐 Your transaction PIN' : '🔐 Transaction PIN sent to the user'}</p>
+                <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">{selfFrom === 'user' ? pinVal : '****'}</p>
+                <p className="text-[11px] font-semibold leading-relaxed mt-1.5 opacity-90">{selfFrom === 'user' ? 'আপনার পিন এনক্রাইপটেড। এটা আপনি ছাড়া অন্য কেউ দেখতে পারবে না।' : 'Hidden for privacy — only the user can see their PIN.'}</p>
+              </div>
+            </div>
+          )
+        }
         if (m.from === 'system') return (
           <div key={m.id} className="flex justify-center px-2">
             <p className="text-center text-xs font-semibold leading-relaxed px-4 py-2 rounded-2xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">{m.text}</p>
@@ -81,7 +102,8 @@ export function SupportListPage() {
   const mine = db.tickets.filter(x => x.userId === user.id).slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const start = async () => {
     if (starting) return
-    if (!form.subject.trim() || !form.message.trim()) return toast({ kind: 'error', title: 'Write a subject and your message' })
+    if (!form.subject) return toast({ kind: 'error', title: 'Select a subject' })
+    if (!form.message.trim()) return toast({ kind: 'error', title: 'Write your message' })
     setStarting(true)
     const err = await addTicket(form.subject.trim(), form.message.trim())
     setStarting(false)
@@ -101,7 +123,13 @@ export function SupportListPage() {
       <Card className="p-5 mb-5">
         <p className="font-extrabold text-sm mb-3">{t('chat_new')}</p>
         <div className="space-y-4">
-          <Input label="Subject" value={form.subject} onChange={e => setForm(x => ({ ...x, subject: e.target.value }))} />
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">Subject</label>
+            <select value={form.subject} onChange={e => setForm(x => ({ ...x, subject: e.target.value }))} className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400">
+              <option value="" disabled>Select a subject</option>
+              {SUPPORT_SUBJECTS.map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
           <Input label="Message" value={form.message} onChange={e => setForm(x => ({ ...x, message: e.target.value }))} />
           <Btn className="w-full py-3.5" disabled={starting} onClick={start}>{starting ? <Loader2 size={16} className="animate-spin" /> : t('chat_start')}</Btn>
         </div>
@@ -174,7 +202,7 @@ export function SupportChatPage() {
 /* ---------------- Admin: full-page chat with options panel ---------------- */
 
 export function AdminSupportChatPage() {
-  const { db, user, markTicketRead, resolveTicket, deleteTicket, startChatVerify, toast } = useApp()
+  const { db, user, markTicketRead, resolveTicket, deleteTicket, startChatVerify, setChatVerify, sendChatPin, toast } = useApp()
   const navigate = useNavigate()
   const { ticketId } = useParams()
   const tk = db.tickets.find(x => x.id === ticketId)
@@ -182,24 +210,32 @@ export function AdminSupportChatPage() {
   const { text, setText, sending, send } = useChatSend(tk, 'admin')
   const scrollRef = useScrollToBottom(tk?.messages.length)
   const [delArm, setDelArm] = useState(false)
-  const [panelOpen, setPanelOpen] = useState(false)
-  const [verifyBusy, setVerifyBusy] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuDelArm, setMenuDelArm] = useState(false)
+  const [menuBusy, setMenuBusy] = useState('')
   useEffect(() => { if (ticketId) void markTicketRead(ticketId, true) }, [ticketId])
-  useEffect(() => { setDelArm(false) }, [ticketId])
+  useEffect(() => { setDelArm(false); setMenuOpen(false); setMenuDelArm(false) }, [ticketId])
   useEffect(() => {
     if (!delArm) return
     const id = window.setTimeout(() => setDelArm(false), 4000)
     return () => window.clearTimeout(id)
   }, [delArm])
+  useEffect(() => {
+    if (!menuDelArm) return
+    const id = window.setTimeout(() => setMenuDelArm(false), 4000)
+    return () => window.clearTimeout(id)
+  }, [menuDelArm])
   if (!user || user.role !== 'admin') return <Card className="p-6"><Empty title="Admins only" body="This page is part of the admin panel." /></Card>
-  const startVerify = async () => {
-    if (!tk || verifyBusy) return
-    setVerifyBusy(true)
-    const err = await startChatVerify(tk.id)
-    setVerifyBusy(false)
+  const runMenu = async (key: string, fn: () => Promise<string | null>, okTitle: string, okBody?: string) => {
+    if (menuBusy) return
+    setMenuBusy(key)
+    const err = await fn()
+    setMenuBusy('')
+    setMenuOpen(false)
     if (err) return toast({ kind: 'error', title: err })
-    toast({ kind: 'success', title: 'Verification code sent', body: 'The code was emailed to ' + (tku?.email ?? 'the user') + '. Ask them to send it here in the chat.' })
+    toast({ kind: 'success', title: okTitle, body: okBody })
   }
+  const menuItem = "w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-50"
   return (
     <div className="flex flex-col" style={{ height: 'calc(100dvh - 190px)', minHeight: 340 }}>
       <div className="flex items-center gap-2.5 flex-wrap mb-3 shrink-0">
@@ -217,39 +253,58 @@ export function AdminSupportChatPage() {
         ) : (
           <button onClick={() => setDelArm(true)} title="Delete this chat" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-rose-500 border border-rose-300/60 dark:border-rose-500/40 hover:bg-rose-50 dark:hover:bg-rose-500/10 active:scale-[.98] transition"><Trash2 size={15} /></button>
         ))}
+        {tk && (
+          <div className="relative shrink-0">
+            <button onClick={() => { setMenuOpen(o => !o); setMenuDelArm(false) }} title="Chat menu" className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center"><MoreVertical size={18} /></button>
+            {menuOpen && (
+              <>
+                <button aria-hidden className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-12 z-40 w-64 rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 overflow-hidden anim-fade-up">
+                  <button className={menuItem} disabled={!!menuBusy} onClick={() => runMenu('verify', () => setChatVerify(tk.id, tk.verifyStatus !== 'verified'), tk.verifyStatus === 'verified' ? 'Marked as Unverified' : 'Marked as Verified')}>
+                    <ShieldCheck size={17} className={tk.verifyStatus === 'verified' ? 'text-emerald-500' : 'text-slate-400'} />
+                    <span className="flex-1">{tk.verifyStatus === 'verified' ? 'Verified' : 'Unverified'}<span className="block text-[11px] font-semibold text-slate-400">{tk.verifyStatus === 'verified' ? 'Tap to mark unverified' : 'Tap to mark verified manually'}</span></span>
+                    {menuBusy === 'verify' && <Loader2 size={15} className="animate-spin" />}
+                  </button>
+                  {tk.status !== 'resolved' && (
+                    <button className={menuItem} disabled={!!menuBusy} onClick={() => runMenu('code', () => startChatVerify(tk.id), 'Verification code sent', 'The code was emailed to ' + (tku?.email ?? 'the user') + '. Ask them to send it here in the chat.')}>
+                      <Mail size={17} className="text-violet-500" />
+                      <span className="flex-1">{tk.verifyStatus === 'pending' ? 'Resend Code' : 'Send Code'}<span className="block text-[11px] font-semibold text-slate-400">Email a 6-digit verification code</span></span>
+                      {menuBusy === 'code' && <Loader2 size={15} className="animate-spin" />}
+                    </button>
+                  )}
+                  {tk.status !== 'resolved' && (
+                    <button className={menuItem} disabled={!!menuBusy} onClick={() => runMenu('pin', () => sendChatPin(tk.id), 'PIN sent to the user', 'Only the user can see it — it stays **** here.')}>
+                      <KeyRound size={17} className="text-amber-500" />
+                      <span className="flex-1">Send PIN<span className="block text-[11px] font-semibold text-slate-400">Send the current PIN — visible only to the user</span></span>
+                      {menuBusy === 'pin' && <Loader2 size={15} className="animate-spin" />}
+                    </button>
+                  )}
+                  {tk.status !== 'resolved' && (
+                    <button className={menuItem} onClick={() => { resolveTicket(tk.id); setMenuOpen(false); toast({ kind: 'success', title: 'Chat resolved & closed' }) }}>
+                      <Check size={17} className="text-emerald-500" />
+                      <span className="flex-1">Resolved<span className="block text-[11px] font-semibold text-slate-400">Mark resolved and close this chat</span></span>
+                    </button>
+                  )}
+                  <button className={menuItem} onClick={() => {
+                    if (!menuDelArm) { setMenuDelArm(true); return }
+                    deleteTicket(tk.id); setMenuOpen(false); toast({ kind: 'success', title: 'Chat deleted', body: 'The whole conversation was removed.' }); navigate('/admin?tab=support')
+                  }}>
+                    <Trash2 size={17} className="text-rose-500" />
+                    <span className="flex-1 text-rose-600">{menuDelArm ? 'Tap again to delete' : 'Delete'}<span className="block text-[11px] font-semibold text-slate-400">Delete this whole conversation</span></span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
       {!tk ? (
         <Card className="p-6"><Empty title="Chat not available" body="This conversation may have been deleted." /></Card>
       ) : (
-        <div className="relative flex-1 min-h-0 flex flex-col">
+        <>
           <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto rounded-3xl bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-2.5 mb-3">
             <ChatMessages tk={tk} selfFrom="admin" otherName={tku?.name ?? 'User'} />
           </div>
-          {/* Side arrow: opens the chat options panel (more options will live here) */}
-          <button onClick={() => setPanelOpen(o => !o)} title="Chat options" className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-9 h-14 rounded-full bg-white dark:bg-slate-800 shadow-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-500 hover:text-violet-600 transition">
-            <ChevronRight size={19} className={`transition-transform ${panelOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {panelOpen && (
-            <div className="absolute right-14 top-1/2 -translate-y-1/2 z-20 w-64 rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 p-4 anim-fade-up">
-              <div className="flex items-center justify-between mb-3">
-                <p className="font-extrabold text-sm">Chat options</p>
-                <button onClick={() => setPanelOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
-              </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-3.5">
-                <p className="font-bold text-sm flex items-center gap-1.5"><ShieldCheck size={15} className="text-violet-500" /> Identity verification</p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {tk.verifyStatus === 'verified' ? '✅ This user is verified for this chat.'
-                    : tk.verifyStatus === 'pending' ? '⏳ Code sent — waiting for the user to send it here.'
-                    : 'Email the user a 6-digit code and ask them to send it here in the chat.'}
-                </p>
-                {tk.status !== 'resolved' && tk.verifyStatus !== 'verified' && (
-                  <Btn className="w-full mt-3 !py-2.5" disabled={verifyBusy} onClick={startVerify}>
-                    {verifyBusy ? <Loader2 size={15} className="animate-spin" /> : tk.verifyStatus === 'pending' ? 'Resend code' : 'Verify user'}
-                  </Btn>
-                )}
-              </div>
-            </div>
-          )}
           {tk.status === 'resolved' ? (
             <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3 shrink-0">This chat is resolved and closed. The customer must open a new chat for further help.</p>
           ) : (
@@ -258,7 +313,7 @@ export function AdminSupportChatPage() {
               <Btn className="!px-5 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : 'Send'}</Btn>
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )

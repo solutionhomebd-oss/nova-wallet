@@ -308,7 +308,7 @@ export function SendMoney() {
   const match = useMemo(() => {
     const s = q.trim().toLowerCase()
     if (!s) return null
-    return db.users.find(u => u.id !== user?.id && u.role === 'user' && u.username.toLowerCase() === s) ?? null
+    return db.users.find(u => u.id !== user?.id && u.role === 'user' && (u.username.toLowerCase() === s || u.email.toLowerCase() === s || (u.novaAddress || '').toLowerCase() === s)) ?? null
   }, [q, db.users, user])
   useEffect(() => { setTo(match) }, [match])
   const amt = Number(amount) || 0
@@ -337,12 +337,12 @@ export function SendMoney() {
         {sstep === 0 && (
           <div className="space-y-4 anim-fade-up">
             <div className="relative">
-              <Input label={t('send_username')} placeholder="Type the full username, e.g. arif92" value={q} onChange={e => setQ(e.target.value)} className="pr-11" />
+              <Input label={t('send_username')} placeholder="Username, email or NW address…" value={q} onChange={e => setQ(e.target.value)} className="pr-11" />
               {q.trim() && (match
                 ? <CheckCircle2 size={22} className="absolute right-3.5 bottom-3.5 text-emerald-500 pointer-events-none" />
                 : <XCircle size={22} className="absolute right-3.5 bottom-3.5 text-rose-500 pointer-events-none" />)}
             </div>
-            {q.trim() && !match && <p className="-mt-2 text-xs font-semibold text-rose-500">No account with that exact username — check the spelling.</p>}
+            {q.trim() && !match && <p className="-mt-2 text-xs font-semibold text-rose-500">No account matches that exactly — check the spelling.</p>}
             {to && (
               <div className="rounded-2xl bg-violet-50 dark:bg-violet-500/10 p-4 flex items-center gap-3">
                 <Avatar name={to.name} size={44} photo={to.photo} />
@@ -414,7 +414,7 @@ export function SendMoney() {
 export function ReceiveMoney() {
   const { user, db, toast, t } = useApp()
   if (!user) return null
-  const payload = `novawallet://pay/${user.id}`
+  const payload = user.novaAddress || user.id
   const incoming = db.txs.filter(t => t.userId === user.id && t.category === 'receive')
   const copy = (text: string, label: string) => { navigator.clipboard?.writeText(text); toast({ kind: 'success', title: label + ' copied' }) }
   return (
@@ -427,7 +427,7 @@ export function ReceiveMoney() {
         <p className="mt-4 font-extrabold text-lg">{user.name}</p>
         <p className="text-sm text-slate-500">@{user.username}</p>
         <div className="mt-4 space-y-2 text-left">
-          {[['Payment ID (User ID)', user.id], ['Wallet address', payload], ['Phone', user.phone]].map(([k, v]) => (
+          {[['NovaWallet address', user.novaAddress || '—'], ['Payment ID (User ID)', user.id], ['Phone', user.phone]].map(([k, v]) => (
             <div key={k} className="flex items-center gap-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 px-4 py-3">
               <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-400 uppercase font-bold">{k}</p><p className="font-mono text-sm truncate">{v}</p></div>
               <button onClick={() => copy(v, k)} className="p-2 rounded-xl bg-white dark:bg-slate-900 shadow"><Copy size={15} /></button>
@@ -435,7 +435,7 @@ export function ReceiveMoney() {
           ))}
         </div>
         <div className="flex gap-3 mt-4">
-          <Btn variant="ghost" className="flex-1" onClick={() => { if (navigator.share) navigator.share({ title: 'Pay me on NovaWallet', text: payload }); else copy(payload, 'Payment link') }}><Share2 size={16} /> Share</Btn>
+          <Btn variant="ghost" className="flex-1" onClick={() => { if (navigator.share) navigator.share({ title: 'Pay me on NovaWallet', text: payload }); else copy(payload, 'NovaWallet address') }}><Share2 size={16} /> Share</Btn>
           <Btn variant="ghost" className="flex-1" onClick={() => toast({ kind: 'info', title: 'Tip', body: 'Screenshot the QR code to save it.' })}><Download size={16} /> Save QR</Btn>
         </div>
       </Card>

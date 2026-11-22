@@ -12,7 +12,8 @@ export interface User {
   emailVerified?: boolean
   pinFailCount?: number; pinLockedUntil?: string
   passwordHash: string; pinHash: string; role: Role; status: UserStatus; kyc: KycStatus
-  referralCode: string; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
+  referralCode: string
+  novaAddress?: string; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
   /** Firebase UID once the account is linked to the backend (Phase 1+). */
   fbUid?: string
   /** RBAC scope for admin accounts (server-side, D1 users.admin_scope):

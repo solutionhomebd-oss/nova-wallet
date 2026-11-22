@@ -378,6 +378,7 @@ const isoOf = (s) => (s && s.includes("T") ? s : (s || "").replace(" ", "T") + "
 async function loadState(db, uid, lite = false) {
   const me = await getUserRow(db, uid);
   if (!me) return null;
+  if (!me.nova_address) { try { me.nova_address = await genNovaAddress(db); await db.prepare("UPDATE users SET nova_address = ? WHERE id = ?").bind(me.nova_address, uid).run(); } catch { /* best effort */ } }
   const wallet = await getWallet(db, uid);
   const bals = wallet ? await getBalances(db, wallet.id) : new Map();
   const holdings = {};
@@ -406,7 +407,7 @@ async function loadState(db, uid, lite = false) {
       id: me.id, email: me.email, username: me.username, name: me.full_name || "",
       phone: me.phone || "", ...(me.avatar_url ? { photo: me.avatar_url } : {}),
       role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code, emailVerified: Number(me.email_verified) === 1,
-      pinHash: me.pin_hash || "",
+      pinHash: me.pin_hash || "", novaAddress: me.nova_address || "",
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
       ...(kycRow ? { kycDocType: kycRow.doc_type, kycDocNumber: kycRow.doc_number, kycSubmittedAt: isoOf(kycRow.created_at) } : {}),
@@ -460,7 +461,7 @@ async function loadState(db, uid, lite = false) {
 
 async function loadDirectory(db, includePhone = false) {
   const rows = await db.prepare(
-    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.admin_scope, u.created_at, u.pin_fail_count, u.pin_locked_until, p.full_name,
+    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.nova_address, u.admin_scope, u.created_at, u.pin_fail_count, u.pin_locked_until, p.full_name,
        (SELECT status FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_status,
        (SELECT doc_type FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_type,
        (SELECT doc_number FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_number,
@@ -470,7 +471,7 @@ async function loadDirectory(db, includePhone = false) {
   return rows.results.map((u) => ({
     id: u.id, email: u.email, username: u.username, name: u.full_name || "",
     ...(includePhone ? { phone: u.phone || "" } : {}),
-    role: u.role, status: u.status, level: Number(u.level), referralCode: u.referral_code,
+    role: u.role, status: u.status, level: Number(u.level), referralCode: u.referral_code, novaAddress: u.nova_address || "",
     ...(u.admin_scope ? { adminScope: u.admin_scope } : {}),
     pinFailCount: Number(u.pin_fail_count || 0), ...(u.pin_locked_until ? { pinLockedUntil: u.pin_locked_until } : {}),
     createdAt: isoOf(u.created_at),
@@ -526,6 +527,24 @@ async function ensureSession(db, request, auth, body) {
   return id;
 }
 
+const NOVA_ADDR_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+async function genNovaAddress(db) {
+  for (let i = 0; i < 8; i++) {
+    const bytes = new Uint8Array(24); crypto.getRandomValues(bytes);
+    let a = "NW"; for (const b of bytes) a += NOVA_ADDR_CHARS[b % NOVA_ADDR_CHARS.length];
+    const taken = await db.prepare("SELECT id FROM users WHERE nova_address = ?").bind(a).first();
+    if (!taken) return a;
+  }
+  return "NW" + crypto.randomUUID().replace(/[^A-Z0-9]/gi, "").slice(0, 24).toUpperCase();
+}
+// Public: is a username free? Used by the registration form for live feedback.
+async function handleUsernameCheck(request, env, body) {
+  const u = String(body.username || "").trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,24}$/.test(u)) return json(request, { ok: true, available: false, valid: false });
+  const row = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(u).first();
+  return json(request, { ok: true, available: !row, valid: true });
+}
+
 async function handleBootstrap(request, env, auth) {
   const db = env.DB;
   let body = {};
@@ -541,6 +560,9 @@ async function handleBootstrap(request, env, auth) {
     }
     if (!existing.pin_hash_v2 && body.pinHash) {
       try { await db.prepare("UPDATE users SET pin_hash_v2 = ? WHERE id = ?").bind(await pbkdf2Hash(String(body.pinHash)), auth.uid).run(); } catch { /* best effort */ }
+    }
+    if (!existing.nova_address) {
+      try { await db.prepare("UPDATE users SET nova_address = ? WHERE id = ?").bind(await genNovaAddress(db), auth.uid).run(); } catch { /* best effort */ }
     }
     // New-sign-in alert: a fresh session for an account that already has
     // sessions means a new device/browser — email the owner (max once/day).
@@ -590,6 +612,9 @@ async function handleBootstrap(request, env, auth) {
   if (!username || !fullName || !pinHash) {
     return json(request, { error: "username, fullName and pinHash are required" }, 400);
   }
+  const nameTaken = await db.prepare("SELECT id FROM users WHERE username = ?").bind(username).first();
+  if (nameTaken) return json(request, { error: "That username is already taken \u2014 please choose another." }, 400);
+  const novaAddress = await genNovaAddress(db);
   const email = auth.email || String(body.email || "");
   const referralCode = "NW" + auth.uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase();
   let referrerId = null;
@@ -612,8 +637,8 @@ async function handleBootstrap(request, env, auth) {
   const walletId = crypto.randomUUID();
   const stmts = [
     db.prepare(
-      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId, emailVerified),
+      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by, email_verified, nova_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId, emailVerified, novaAddress),
     db.prepare("INSERT INTO user_profiles (user_id, full_name) VALUES (?, ?)").bind(auth.uid, fullName),
     db.prepare("INSERT INTO wallets (id, user_id) VALUES (?, ?)").bind(walletId, auth.uid),
     db.prepare("INSERT INTO wallet_balances (wallet_id, currency, available, locked) VALUES (?, 'BDT', 0, 0)").bind(walletId),
@@ -640,7 +665,7 @@ async function handleMe(request, env, auth) {
     user: {
       id: row.id, email: row.email, username: row.username, fullName: row.full_name,
       phone: row.phone, role: row.role, status: row.status, level: row.level,
-      referralCode: row.referral_code, pinHash: row.pin_hash, emailVerified: Number(row.email_verified) === 1,
+      referralCode: row.referral_code, pinHash: row.pin_hash, novaAddress: row.nova_address || "", emailVerified: Number(row.email_verified) === 1,
       walletId: wallet ? wallet.id : null,
     },
   });
@@ -1588,6 +1613,23 @@ async function handleAdminBannerDelete(request, env, auth, body) {
   if (!scopeAllowed(auth, ["content"])) return json(request, { error: "scope_denied" }, 403);
   await db.prepare("DELETE FROM banners WHERE id = ?").bind(String(body.id || "")).run();
   await auditLog(db, auth, "banner.delete", String(body.id || ""));
+  return json(request, { ok: true, overview: await loadOverview(db) });
+}
+
+async function handleAdminBannerMove(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["content"])) return json(request, { error: "scope_denied" }, 403);
+  const rows = await db.prepare("SELECT id, sort_order FROM banners ORDER BY sort_order ASC").all();
+  const list = rows.results;
+  const i = list.findIndex((b) => b.id === String(body.id || ""));
+  const j = body.dir === "up" ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= list.length) return json(request, { ok: true, overview: await loadOverview(db) });
+  const a = list[i], b = list[j];
+  await db.batch([
+    db.prepare("UPDATE banners SET sort_order = ? WHERE id = ?").bind(b.sort_order, a.id),
+    db.prepare("UPDATE banners SET sort_order = ? WHERE id = ?").bind(a.sort_order, b.id),
+  ]);
+  await auditLog(db, auth, "banner.move", a.id + (body.dir === "up" ? " moved up" : " moved down"));
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -2633,6 +2675,7 @@ export default {
       if (path === "/v1/password/reset") return await handlePasswordResetByOtp(request, env, b);
       if (path === "/v1/password/reset-by-pin") return await handlePasswordResetByPin(request, env, b);
       if (path === "/v1/verify-email/request") return await handleVerifyEmailRequest(request, env, b);
+      if (path === "/v1/username/check") return await handleUsernameCheck(request, env, b);
       if (path === "/v1/verify-email/confirm") return await handleVerifyEmailConfirm(request, env, b);
     }
 
@@ -2739,6 +2782,7 @@ export default {
             case "/v1/admin/banners/toggle": return await handleAdminBannerToggle(request, env, auth, body);
             case "/v1/admin/banners/save": return await handleAdminBannerSave(request, env, auth, body);
             case "/v1/admin/banners/delete": return await handleAdminBannerDelete(request, env, auth, body);
+            case "/v1/admin/banners/move": return await handleAdminBannerMove(request, env, auth, body);
             case "/v1/admin/settings": return await handleAdminSettings(request, env, auth, body);
             case "/v1/admin/broadcast": return await handleAdminBroadcast(request, env, auth, body);
             case "/v1/admin/set-scope": return await handleAdminSetScope(request, env, auth, body);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowDownToLine, ArrowUpFromLine, Bitcoin, CheckCircle2, Gift, Globe, HandCoins, Landmark, Loader2, Repeat, Send, ShieldCheck, Sparkles, TrendingUp } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, Bitcoin, CheckCircle2, Gift, Globe, HandCoins, Landmark, Loader2, Repeat, Send, ShieldCheck, Sparkles, TrendingUp, XCircle } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { Btn, Input, PinBoxes } from '../components/ui'
 import { Logo } from '../components/Layout'
@@ -12,7 +12,7 @@ import { Logo } from '../components/Layout'
 const TURNSTILE_SITE_KEY = ''
 
 export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landing' | 'login' | 'register' }) {
-  const { login, register, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, toast, t } = useApp()
+  const { login, register, checkUsername, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, toast, t } = useApp()
   const navigate = useNavigate()
   const refCode = new URLSearchParams(window.location.search).get('ref') ?? ''
   const [mode] = useState<'landing' | 'login' | 'register'>(refCode ? 'register' : initialMode)
@@ -126,6 +126,17 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
     toast({ kind: 'success', title: 'Password reset', body: 'Log in with your new password.' })
     setLoginId(fp.email); setLoginPw(''); setErr(''); setStep('auth'); setFpOtp(''); setFpOtpDemo(null); setFpSent(false); setFpOtpVerified(false)
   }
+  // Live username availability for the registration form: the customer
+  // picks their own username, so show at once whether it is free.
+  const [unameState, setUnameState] = useState<'idle' | 'checking' | 'ok' | 'taken' | 'invalid'>('idle')
+  useEffect(() => {
+    const u = form.username.trim().toLowerCase()
+    if (!u) { setUnameState('idle'); return }
+    if (!/^[a-z0-9_]{3,24}$/.test(u)) { setUnameState('invalid'); return }
+    setUnameState('checking')
+    const h = setTimeout(async () => { const r = await checkUsername(u); setUnameState(r ? (r.available ? 'ok' : 'taken') : 'idle') }, 600)
+    return () => clearTimeout(h)
+  }, [form.username])
   const doRegister = async (verifyGrant?: string) => {
     if (form.password.length < 6) return setErr('Password must be at least 6 characters.')
     if (!/^\d{4}$/.test(form.pin)) return setErr('Transaction PIN must be exactly 4 digits.')
@@ -138,6 +149,8 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
   // address is real before the account exists. When email delivery is off
   // (demo mode), registration proceeds directly, exactly as before.
   const startRegister = async () => {
+    if (unameState === 'taken') return setErr('That username is already taken \u2014 please choose another.')
+    if (unameState === 'invalid') return setErr('Username must be 3\u201324 characters: lowercase letters, numbers or underscore.')
     if (regBusy) return
     if (form.password.length < 6) return setErr('Password must be at least 6 characters.')
     if (!/^\d{4}$/.test(form.pin)) return setErr('Transaction PIN must be exactly 4 digits.')
@@ -378,6 +391,10 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
             <div className="space-y-4">
               <Input label={t('full_name')} placeholder="Your name" value={form.name} onChange={set('name')} />
               <Input label={t('username')} placeholder="username" value={form.username} onChange={set('username')} />
+              {unameState === 'ok' && <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-500 -mt-1"><CheckCircle2 size={14} /> Username available</p>}
+              {unameState === 'taken' && <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-500 -mt-1"><XCircle size={14} /> That username is already taken</p>}
+              {unameState === 'invalid' && <p className="text-xs font-semibold text-rose-500 -mt-1">3–24 characters: lowercase letters, numbers or underscore</p>}
+              {unameState === 'checking' && <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 -mt-1"><Loader2 size={14} className="animate-spin" /> Checking availability…</p>}
               <Input label={t('phone')} placeholder="+880 1XXX-XXXXXX · +91 · +1 · …" value={form.phone} onChange={set('phone')} />
               <Input label="Email" type="email" placeholder="you@email.com" value={form.email} onChange={set('email')} />
               <Input label={t('password_min')} type="password" placeholder="••••••••" value={form.password} onChange={set('password')} />

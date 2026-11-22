@@ -111,6 +111,7 @@ interface Ctx {
   verifyPasswordOtp: (email: string, otp: string) => string | null
   resetPasswordWithOtp: (email: string, otp: string, newPassword: string) => string | null
   register: (p: { name: string; username: string; email: string; phone: string; password: string; pin: string; referralCode?: string; turnstileToken?: string; verifyGrant?: string }) => Promise<string | null>
+  checkUsername: (username: string) => Promise<{ available: boolean; valid: boolean } | null>
   walletOf: (userId: string) => DB['wallets'][number]
   addDeposit: (p: { method: string; amount: number; trxId: string; receipt?: string; methodId?: string; kind?: 'bank' | 'crypto'; verification?: 'manual' | 'auto' }) => Promise<string | null>
   decideDeposit: (id: string, ok: boolean) => Promise<void>
@@ -168,6 +169,7 @@ interface Ctx {
   toggleBanner: (id: string) => void
   saveBanner: (b: { id?: string; title: string; subtitle: string; gradient: string; active: boolean }) => void
   deleteBanner: (id: string) => void
+  moveBanner: (id: string, dir: 'up' | 'down') => void
   requestUpgrade: (toLevel: number) => Promise<string | null>
   decideUpgrade: (id: string, ok: boolean) => void
   updateLevelDef: (level: number, patch: Partial<DB['levels'][number]>) => void
@@ -391,7 +393,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt } : {}),
     ...(su.adminScope ? { adminScope: su.adminScope } : {}),
     ...(su.pinFailCount !== undefined ? { pinFailCount: su.pinFailCount } : {}), ...(su.pinLockedUntil ? { pinLockedUntil: su.pinLockedUntil } : {}),
-    referralCode: su.referralCode || '', referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
+    referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
     createdAt: su.createdAt || nowISO(), lastLogin: su.createdAt || nowISO(), sessions: [],
   })
   const mergeDirectoryInto = (d: DB, users: any[]) => {
@@ -420,6 +422,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (su.adminScope) existing.adminScope = su.adminScope; else if (existing.role !== 'admin') delete existing.adminScope
         if (su.kycDocType) { existing.kycDocType = su.kycDocType; existing.kycDocNumber = su.kycDocNumber; existing.kycSubmittedAt = su.kycSubmittedAt }
         if (su.pinFailCount !== undefined) existing.pinFailCount = su.pinFailCount
+        if (su.novaAddress) existing.novaAddress = su.novaAddress
         if (su.pinLockedUntil) existing.pinLockedUntil = su.pinLockedUntil; else delete existing.pinLockedUntil
         continue
       }
@@ -503,6 +506,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.email) lu.email = state.profile.email
       if (state.profile.emailVerified !== undefined) lu.emailVerified = state.profile.emailVerified
       if (state.profile.pinHash) lu.pinHash = state.profile.pinHash
+      if (state.profile.novaAddress) lu.novaAddress = state.profile.novaAddress
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
@@ -715,7 +719,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (me.user.status === 'suspended') { await fbSignOut(firebaseAuth).catch(() => {}); return 'This account is suspended. Contact support.' }
         const nu: User = {
           id: uid('USR'), fbUid: cred.user.uid, name: me.user.fullName || me.user.username, username: me.user.username,
-          email: me.user.email, phone: me.user.phone || '', passwordHash: hashSecret(password), pinHash: me.user.pinHash || '',
+          email: me.user.email, phone: me.user.phone || '', passwordHash: hashSecret(password), pinHash: me.user.pinHash || '', novaAddress: me.user.novaAddress || '',
           role: me.user.role, status: me.user.status, kyc: 'unverified', referralCode: me.user.referralCode || '',
           referredBy: null, twoFA: false, level: me.user.level || 1, language: 'en',
           createdAt: nowISO(), lastLogin: nowISO(), sessions: [{ id: 's1', device: 'Android · Chrome', at: nowISO(), current: true }],
@@ -1584,6 +1588,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       catch (e: any) { toast({ kind: 'error', title: e.message }) }
     })()
   }
+  const moveBanner = (id: string, dir: 'up' | 'down') => {
+    void (async () => {
+      try { const r = await apiPost('/v1/admin/banners/move', { id, dir }); applyMoneyResult(r) }
+      catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    })()
+  }
+  const checkUsername: Ctx['checkUsername'] = async (username) => {
+    try { const r = await publicPost('/v1/username/check', { username }); return { available: !!r.available, valid: r.valid !== false } }
+    catch { return null }
+  }
   const addTicket: Ctx['addTicket'] = async (subject, message) => {
     if (!user) return 'Not signed in'
     try { const r = await apiPost('/v1/tickets', { subject, message }); applyMoneyResult(r); return null }
@@ -1733,7 +1747,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing withdrawal…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
     applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
-    publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
+    publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, checkUsername, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit,
     locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }

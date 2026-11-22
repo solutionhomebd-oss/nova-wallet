@@ -38,7 +38,7 @@ const SCOPE_TABS: Record<string, string[]> = {
 }
 
 export default function Admin() {
-  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked , markRead, markAllRead, broadcast, setAdminScope, setAdminRole, adminErrors } = useApp()
+  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked , markRead, markAllRead, broadcast, setAdminScope, setAdminRole, adminErrors } = useApp()
   const usdt = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const byDateDesc = <T extends { createdAt: string }>(arr: T[]): T[] => [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   const { coins } = useMarket(30_000)
@@ -548,6 +548,10 @@ export default function Admin() {
                   <div className="flex-1 min-w-0"><p className="font-extrabold">{b.title}</p><p className="text-white/80 text-sm">{b.subtitle}</p></div>
                   <div className="flex flex-col gap-1.5 shrink-0">
                     <button onClick={() => toggleBanner(b.id)} className="rounded-full bg-white/20 px-3 py-1.5 text-xs font-bold">{b.active ? 'Active — tap to hide' : 'Hidden — tap to show'}</button>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => moveBanner(b.id, 'up')} className="flex-1 rounded-full bg-white/20 px-3 py-1.5 text-xs font-bold">↑ Up</button>
+                      <button onClick={() => moveBanner(b.id, 'down')} className="flex-1 rounded-full bg-white/20 px-3 py-1.5 text-xs font-bold">↓ Down</button>
+                    </div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setBannerForm({ ...b })} className="flex-1 rounded-full bg-white/20 px-3 py-1.5 text-xs font-bold">Edit</button>
                       <button onClick={() => { deleteBanner(b.id); toast({ kind: 'info', title: 'Banner deleted' }) }} className="flex-1 rounded-full bg-rose-500/80 px-3 py-1.5 text-xs font-bold">Delete</button>

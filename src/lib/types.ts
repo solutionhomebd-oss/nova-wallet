@@ -28,7 +28,7 @@ export interface Wallet { userId: string; available: number; locked: number; hol
 export interface Tx {
   id: string; userId: string; category: TxCategory; title: string
   amount: number; fee: number; currency: string; status: TxStatus
-  note?: string; counterparty?: string; method?: string; createdAt: string
+  note?: string; counterparty?: string; method?: string; ip?: string; createdAt: string
 }
 export interface LedgerEntry { id: string; txId: string; account: string; debit: number; credit: number; createdAt: string }
 export interface DepositReq {

@@ -354,14 +354,19 @@ function ensureCurrencyStmt(db, symbol) {
 
 // Builds a transaction insert statement; returns { stmt, pub } where pub is
 // the public TXN id the app uses for display and deep links.
+// The IP that made the request (Cloudflare sets CF-Connecting-IP).
+function clientIp(request) {
+  return request.headers.get("CF-Connecting-IP") || (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() || "";
+}
+
 function txStmt(db, t) {
   const pub = pubId("TXN");
   const id = crypto.randomUUID();
   const stmt = db.prepare(
-    `INSERT INTO transactions (id, public_id, user_id, category, title, amount, fee, currency, status, note, counterparty, method, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO transactions (id, public_id, user_id, category, title, amount, fee, currency, status, note, counterparty, method, created_at, ip)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(id, pub, t.userId, t.category, t.title, t.amount, t.fee ?? 0, t.currency ?? "BDT",
-    t.status ?? "completed", t.note ?? null, t.counterparty ?? null, t.method ?? null, nowISO());
+    t.status ?? "completed", t.note ?? null, t.counterparty ?? null, t.method ?? null, nowISO(), t.ip || null);
   return { stmt, pub, id };
 }
 
@@ -384,7 +389,7 @@ async function loadState(db, uid, lite = false) {
     id: t.public_id, userId: t.user_id, category: t.category, title: t.title,
     amount: Number(t.amount), fee: Number(t.fee), currency: t.currency, status: t.status,
     note: t.note && t.note.startsWith("earn:") ? undefined : (t.note || undefined), counterparty: t.counterparty ? (names.get(t.counterparty) || undefined) : undefined,
-    method: t.method || undefined, createdAt: isoOf(t.created_at),
+    method: t.method || undefined, ip: t.ip || undefined, createdAt: isoOf(t.created_at),
   });
   const txRows = await db.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 200").bind(uid).all();
   const depRows = await db.prepare("SELECT * FROM deposits WHERE user_id = ? ORDER BY created_at DESC").bind(uid).all();
@@ -632,7 +637,7 @@ async function checkPin(db, uid, pin) {
   return "Incorrect transaction PIN.";
 }
 
-async function buyLogic(db, uid, symbol, amount, priceUsd) {
+async function buyLogic(db, uid, symbol, amount, priceUsd, ip) {
   const settings = await getSettings(db);
   const rate = settings.bdtPerUsd;
   const wallet = await getWallet(db, uid);
@@ -645,7 +650,7 @@ async function buyLogic(db, uid, symbol, amount, priceUsd) {
     const coins = amount / rate;
     stmts.push(adjStmt(db, wallet.id, "BDT", -amount));
     stmts.push(adjStmt(db, wallet.id, "USDT", coins));
-    const t = txStmt(db, { userId: uid, category: "crypto_buy", title: "Bought USDT", amount, currency: "USDT", note: coins.toFixed(2) + " USDT @ 1.00 USDT" });
+    const t = txStmt(db, { userId: uid, category: "crypto_buy", title: "Bought USDT", amount, currency: "USDT", note: coins.toFixed(2) + " USDT @ 1.00 USDT", ip });
     stmts.push(t.stmt);
     return { stmts };
   }
@@ -656,12 +661,12 @@ async function buyLogic(db, uid, symbol, amount, priceUsd) {
   stmts.push(adjStmt(db, wallet.id, "USDT", -Math.min(amount, heldUsdt)));
   if (shortfall > 0) stmts.push(adjStmt(db, wallet.id, "BDT", -Math.round(shortfall * rate)));
   stmts.push(adjStmt(db, wallet.id, symbol, coins));
-  const t = txStmt(db, { userId: uid, category: "crypto_buy", title: "Bought " + symbol, amount: Math.round(amount * rate), currency: symbol, note: coins.toFixed(6) + " " + symbol + " @ " + priceUsd + " USDT" });
+  const t = txStmt(db, { userId: uid, category: "crypto_buy", title: "Bought " + symbol, amount: Math.round(amount * rate), currency: symbol, note: coins.toFixed(6) + " " + symbol + " @ " + priceUsd + " USDT", ip });
   stmts.push(t.stmt);
   return { stmts };
 }
 
-async function sellLogic(db, uid, symbol, coinAmount, priceUsd) {
+async function sellLogic(db, uid, symbol, coinAmount, priceUsd, ip) {
   const settings = await getSettings(db);
   const rate = settings.bdtPerUsd;
   const wallet = await getWallet(db, uid);
@@ -673,14 +678,14 @@ async function sellLogic(db, uid, symbol, coinAmount, priceUsd) {
     const bdt = coinAmount * rate;
     stmts.push(adjStmt(db, wallet.id, "USDT", -coinAmount));
     stmts.push(adjStmt(db, wallet.id, "BDT", bdt));
-    const t = txStmt(db, { userId: uid, category: "crypto_sell", title: "Sold USDT", amount: Math.round(bdt), currency: "USDT", note: coinAmount + " USDT @ 1.00 USDT" });
+    const t = txStmt(db, { userId: uid, category: "crypto_sell", title: "Sold USDT", amount: Math.round(bdt), currency: "USDT", note: coinAmount + " USDT @ 1.00 USDT", ip });
     stmts.push(t.stmt);
     return { stmts };
   }
   const usdt = coinAmount * priceUsd;
   stmts.push(adjStmt(db, wallet.id, symbol, -coinAmount));
   stmts.push(adjStmt(db, wallet.id, "USDT", usdt));
-  const t = txStmt(db, { userId: uid, category: "crypto_sell", title: "Sold " + symbol, amount: Math.round(usdt * rate), currency: symbol, note: coinAmount + " " + symbol + " @ " + priceUsd + " USDT" });
+  const t = txStmt(db, { userId: uid, category: "crypto_sell", title: "Sold " + symbol, amount: Math.round(usdt * rate), currency: symbol, note: coinAmount + " " + symbol + " @ " + priceUsd + " USDT", ip });
   stmts.push(t.stmt);
   return { stmts };
 }
@@ -721,8 +726,8 @@ async function handleSend(request, env, auth, body) {
   if (!sw || !rw) return json(request, { error: "Wallet not found." }, 404);
   const sBals = await getBalances(db, sw.id);
   if (amount + fee > balOf(sBals, "BDT")) return json(request, { error: "Insufficient balance (amount + fee exceeds available balance)." }, 400);
-  const sendTx = txStmt(db, { userId: auth.uid, category: "send", title: "Sent to " + (recipient.full_name || recipient.username), amount, fee, note: note || undefined, counterparty: toUserId });
-  const recvTx = txStmt(db, { userId: toUserId, category: "receive", title: "Received from " + (sender.full_name || sender.username), amount, fee: 0, counterparty: auth.uid });
+  const sendTx = txStmt(db, { userId: auth.uid, category: "send", title: "Sent to " + (recipient.full_name || recipient.username), amount, fee, note: note || undefined, counterparty: toUserId, ip: clientIp(request) });
+  const recvTx = txStmt(db, { userId: toUserId, category: "receive", title: "Received from " + (sender.full_name || sender.username), amount, fee: 0, counterparty: auth.uid, ip: clientIp(request) });
   try {
     await db.batch([
       adjStmt(db, sw.id, "BDT", -(amount + fee)),
@@ -751,11 +756,11 @@ async function handleDeposit(request, env, auth, body) {
   if (!method || !trxId) return json(request, { error: "Method and transaction ID are required." }, 400);
   if (await recentDup(db, "SELECT created_at FROM deposits WHERE user_id = ? AND amount = ? AND status IN ('pending', 'approved') ORDER BY created_at DESC LIMIT 5", [auth.uid, amount])) return json(request, { error: DUP_ERR, code: "duplicate_recent" }, 400);
   const id = pubId("DEP");
-  const t = txStmt(db, { userId: auth.uid, category: "add_money", title: "Add Money via " + method, amount, status: "pending", method });
+  const t = txStmt(db, { userId: auth.uid, category: "add_money", title: "Add Money via " + method, amount, status: "pending", method, ip: clientIp(request) });
   try {
     await db.batch([
-      db.prepare("INSERT INTO deposits (id, user_id, method, amount, provider_trx_id, receipt_url, status, method_id, kind, verification, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)")
-        .bind(id, auth.uid, method, amount, trxId, body.receipt || null, body.methodId || null, body.kind || null, body.verification || null, nowISO()),
+      db.prepare("INSERT INTO deposits (id, user_id, method, amount, provider_trx_id, receipt_url, status, method_id, kind, verification, created_at, ip) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)")
+        .bind(id, auth.uid, method, amount, trxId, body.receipt || null, body.methodId || null, body.kind || null, body.verification || null, nowISO(), clientIp(request)),
       t.stmt,
     ]);
   } catch (e) {
@@ -787,7 +792,7 @@ async function handleWithdraw(request, env, auth, body) {
   const bals = await getBalances(db, wallet.id);
   if (amount > balOf(bals, "BDT")) return json(request, { error: "Insufficient available balance." }, 400);
   const id = pubId("WDR");
-  const t = txStmt(db, { userId: auth.uid, category: "cash_out", title: "Cash Out to " + method, amount, fee, status: "pending", method });
+  const t = txStmt(db, { userId: auth.uid, category: "cash_out", title: "Cash Out to " + method, amount, fee, status: "pending", method, ip: clientIp(request) });
   try {
     await db.batch([
       adjStmt(db, wallet.id, "BDT", -amount, amount),
@@ -821,7 +826,7 @@ async function handleDirectWithdraw(request, env, auth, body) {
   const bals = await getBalances(db, wallet.id);
   if (amount > balOf(bals, "BDT")) return json(request, { error: "Insufficient available balance." }, 400);
   const id = pubId("WDR");
-  const t = txStmt(db, { userId: auth.uid, category: "direct_withdraw", title: "Direct Withdraw to " + method, amount, fee, status: "completed", method, note: "Instant withdrawal — no admin review" });
+  const t = txStmt(db, { userId: auth.uid, category: "direct_withdraw", title: "Direct Withdraw to " + method, amount, fee, status: "completed", method, note: "Instant withdrawal — no admin review", ip: clientIp(request) });
   try {
     await db.batch([
       adjStmt(db, wallet.id, "BDT", -amount),
@@ -857,10 +862,10 @@ async function handleTrade(request, env, auth, body, side) {
   let r;
   if (side === "buy") {
     if (badAmount(body.amount)) return json(request, { error: "Enter a valid amount." }, 400);
-    r = await buyLogic(db, target, symbol, body.amount, priceUsd);
+    r = await buyLogic(db, target, symbol, body.amount, priceUsd, clientIp(request));
   } else {
     if (badAmount(body.coinAmount)) return json(request, { error: "Enter a valid amount." }, 400);
-    r = await sellLogic(db, target, symbol, body.coinAmount, priceUsd);
+    r = await sellLogic(db, target, symbol, body.coinAmount, priceUsd, clientIp(request));
   }
   if (r.error) return json(request, { error: r.error }, 400);
   try { await db.batch(r.stmts); } catch (e) { return json(request, { error: "Trade failed: " + String(e?.message || e) }, 500); }
@@ -900,7 +905,7 @@ async function handleSwap(request, env, auth, body) {
   if (toSym === "BDT") stmts.push(adjStmt(db, wallet.id, "BDT", toAmt));
   else stmts.push(adjStmt(db, wallet.id, toSym, toAmt));
   const note = amountFrom + " " + fromSym + " → " + (toSym === "BDT" ? Math.round(toAmt) : toSym === "USDT" ? toAmt.toFixed(2) : toAmt.toFixed(6)) + " " + toSym;
-  const t = txStmt(db, { userId: auth.uid, category: "swap", title: "Swap " + fromSym + " → " + toSym, amount: Math.round(usdGross * rate), fee: Math.round(feeUsd * rate), note });
+  const t = txStmt(db, { userId: auth.uid, category: "swap", title: "Swap " + fromSym + " → " + toSym, amount: Math.round(usdGross * rate), fee: Math.round(feeUsd * rate), note, ip: clientIp(request) });
   stmts.push(t.stmt);
   if (await recentDup(db, "SELECT created_at FROM transactions WHERE user_id = ? AND category = 'swap' AND title = ? AND ABS(amount) = ? AND status NOT IN ('cancelled', 'rejected') ORDER BY created_at DESC LIMIT 5", [auth.uid, "Swap " + fromSym + " → " + toSym, Math.round(usdGross * rate)])) return json(request, { error: DUP_ERR, code: "duplicate_recent" }, 400);
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Swap failed: " + String(e?.message || e) }, 500); }
@@ -923,7 +928,7 @@ async function handleStake(request, env, auth, body) {
   const cashPart = amount - Math.round(usdtPart * rate);
   if (cashPart > balOf(bals, "BDT")) return json(request, { error: "Insufficient balance. Add money first." }, 400);
   const id = pubId("STK");
-  const t = txStmt(db, { userId: auth.uid, category: "stake", title: "Staked in Earn (" + apy + "% APY)", amount });
+  const t = txStmt(db, { userId: auth.uid, category: "stake", title: "Staked in Earn (" + apy + "% APY)", amount, ip: clientIp(request) });
   const stmts = [];
   if (usdtPart > 0) stmts.push(adjStmt(db, wallet.id, "USDT", -usdtPart));
   stmts.push(adjStmt(db, wallet.id, "BDT", -cashPart, amount));
@@ -947,7 +952,7 @@ async function unstakeCore(db, uid, stakeId, ignoreTerm) {
   const amount = Number(st.amount);
   const interest = Math.round(amount * Number(st.apy) / 100 * days / 365);
   const wallet = await getWallet(db, uid);
-  const t = txStmt(db, { userId: uid, category: "earn", title: "Earn unstaked + interest", amount: amount + interest, note: "Interest earned: " + interest + " BDT over " + days.toFixed(2) + " days" });
+  const t = txStmt(db, { userId: uid, category: "earn", title: "Earn unstaked + interest", amount: amount + interest, note: "Interest earned: " + interest + " BDT over " + days.toFixed(2) + " days", ip: clientIp(request) });
   const stmts = [
     adjStmt(db, wallet.id, "BDT", amount + interest, -amount),
     db.prepare("UPDATE stakes SET status = 'closed' WHERE id = ?").bind(stakeId),
@@ -980,8 +985,8 @@ async function handleLoanApply(request, env, auth, body) {
   const { emi, total } = emiCalc(amount, settings.loanRatePct, months);
   const id = pubId("LOAN");
   try {
-    await db.prepare("INSERT INTO loans (id, user_id, principal, rate_pct, months, emi, total_payable, paid, status, info, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?)")
-      .bind(id, auth.uid, amount, settings.loanRatePct, months, Math.round(emi), Math.round(total), info ? JSON.stringify(info) : null, nowISO()).run();
+    await db.prepare("INSERT INTO loans (id, user_id, principal, rate_pct, months, emi, total_payable, paid, status, info, created_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, ?)")
+      .bind(id, auth.uid, amount, settings.loanRatePct, months, Math.round(emi), Math.round(total), info ? JSON.stringify(info) : null, nowISO(), clientIp(request)).run();
   } catch (e) {
     return json(request, { error: "Loan application failed: " + String(e?.message || e) }, 500);
   }
@@ -1002,7 +1007,7 @@ async function handleLoanRepay(request, env, auth, body) {
   if (amount > balOf(bals, "BDT")) return json(request, { error: "Insufficient balance." }, 400);
   const newPaid = Number(loan.paid) + amount;
   const done = newPaid >= Number(loan.total_payable);
-  const t = txStmt(db, { userId: auth.uid, category: "loan_repayment", title: "Loan repayment", amount });
+  const t = txStmt(db, { userId: auth.uid, category: "loan_repayment", title: "Loan repayment", amount, ip: clientIp(request) });
   try {
     await db.batch([
       adjStmt(db, wallet.id, "BDT", -amount),
@@ -1060,7 +1065,7 @@ async function handleEarnClaim(request, env, auth, body) {
   if (Number(cnt?.c ?? 0) >= cap.perDay) return json(request, { error: "Daily limit reached for this reward." }, 400);
   const wallet = await getWallet(db, auth.uid);
   const safeTitle = String(title || "Earn reward").slice(0, 80);
-  const t = txStmt(db, { userId: auth.uid, category: "earn", title: safeTitle, amount, note: "earn:" + kind });
+  const t = txStmt(db, { userId: auth.uid, category: "earn", title: safeTitle, amount, note: "earn:" + kind, ip: clientIp(request) });
   try {
     await db.batch([adjStmt(db, wallet.id, "BDT", amount), t.stmt]);
   } catch (e) {
@@ -1709,7 +1714,7 @@ async function handleDecideDeposit(request, env, auth, body) {
       if (!prior || Number(prior.c) === 0) {
         const bonus = Math.round(Number(dep.amount) * promo.firstDepositBonusPct / 100);
         if (bonus > 0) {
-          const bt = txStmt(db, { userId: dep.user_id, category: "earn", title: "First deposit bonus (" + promo.firstDepositBonusPct + "% match)", amount: bonus, note: "Bonus on your first approved deposit." });
+          const bt = txStmt(db, { userId: dep.user_id, category: "earn", title: "First deposit bonus (" + promo.firstDepositBonusPct + "% match)", amount: bonus, note: "Bonus on your first approved deposit.", ip: dep.ip || undefined });
           stmts.push(adjStmt(db, wallet.id, "BDT", bonus));
           stmts.push(bt.stmt);
           bonusGranted = bonus;
@@ -1768,7 +1773,7 @@ async function handleDecideLoan(request, env, auth, body) {
   const stmts = [db.prepare("UPDATE loans SET status = ? WHERE id = ?").bind(ok ? "active" : "rejected", loan.id)];
   if (ok) {
     const wallet = await getWallet(db, loan.user_id);
-    const t = txStmt(db, { userId: loan.user_id, category: "loan_disbursement", title: "Loan disbursed", amount: Number(loan.principal) });
+    const t = txStmt(db, { userId: loan.user_id, category: "loan_disbursement", title: "Loan disbursed", amount: Number(loan.principal), ip: loan.ip || undefined });
     stmts.push(adjStmt(db, wallet.id, "BDT", Number(loan.principal)));
     stmts.push(t.stmt);
   }
@@ -1787,7 +1792,7 @@ async function handleAdminAdjust(request, env, auth, body) {
   if (!wallet) return json(request, { error: "Wallet not found." }, 404);
   const bals = await getBalances(db, wallet.id);
   if (amount < 0 && Math.abs(amount) > balOf(bals, "BDT")) return json(request, { error: "Deduction exceeds the available balance." }, 400);
-  const t = txStmt(db, { userId, category: "adjustment", title: String(title).slice(0, 80), amount, note: note || undefined });
+  const t = txStmt(db, { userId, category: "adjustment", title: String(title).slice(0, 80), amount, note: note || undefined, ip: clientIp(request) });
   try {
     await db.batch([adjStmt(db, wallet.id, "BDT", amount), t.stmt]);
   } catch (e) {
@@ -1979,7 +1984,7 @@ async function handleAdminClearLocked(request, env, auth, body) {
     stmts.push(db.prepare("UPDATE stakes SET status = 'closed' WHERE id = ?").bind(s.id));
   }
   if (principalTotal > 0) {
-    const t = txStmt(db, { userId: uid, category: "earn", title: "Stakes released by support", amount: principalTotal + interestTotal, note: "Principal + accrued interest released early by support." });
+    const t = txStmt(db, { userId: uid, category: "earn", title: "Stakes released by support", amount: principalTotal + interestTotal, note: "Principal + accrued interest released early by support.", ip: clientIp(request) });
     stmts.push(t.stmt);
   }
   // Cancel pending cash outs (their locked amounts return via the release below).

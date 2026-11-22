@@ -13,7 +13,7 @@ export type LangCode = typeof LANGUAGES[number]['code']
 
 const en = {
   nav_home: 'Home', nav_transactions: 'Transactions', nav_news: 'News', nav_profile: 'Profile',
-  admin_panel: 'Admin Panel', welcome_back: 'Welcome back', light_mode: 'Light mode', dark_mode: 'Dark mode',
+  admin_panel: 'Admin Panel', welcome_back: 'Welcome back', light_mode: 'Light mode', dark_mode: 'Dark mode', theme_system: 'System theme',
   total_balance: 'Total balance', total: 'Total', available: 'Available', locked: 'Locked', in_crypto: 'In crypto',
   verified: 'Verified', non_kyc: 'Non KYC', level: 'Level', upgrade: 'Upgrade',
   crypto_market: 'Crypto Market', view_all: 'View all', live_prices: 'Live prices · CoinGecko',
@@ -74,7 +74,7 @@ export type DictKey = keyof typeof en
 
 const bn: Record<string, string> = {
   nav_home: 'হোম', nav_transactions: 'লেনদেন', nav_news: 'নিউজ', nav_profile: 'প্রোফাইল',
-  admin_panel: 'অ্যাডমিন প্যানেল', welcome_back: 'ফিরে আসায় স্বাগতম', light_mode: 'লাইট মোড', dark_mode: 'ডার্ক মোড',
+  admin_panel: 'অ্যাডমিন প্যানেল', welcome_back: 'ফিরে আসায় স্বাগতম', light_mode: 'লাইট মোড', dark_mode: 'ডার্ক মোড', theme_system: 'সিস্টেম থিম',
   total_balance: 'মোট ব্যালান্স', total: 'মোট', available: 'উপলব্ধ', locked: 'লক করা', in_crypto: 'ক্রিপ্টোতে',
   verified: 'ভেরিফাইড', non_kyc: 'নন KYC', level: 'লেভেল', upgrade: 'আপগ্রেড',
   crypto_market: 'ক্রিপ্টো মার্কেট', view_all: 'সব দেখুন', live_prices: 'লাইভ প্রাইস · CoinGecko',
@@ -134,7 +134,7 @@ const bn: Record<string, string> = {
 
 const es: Record<string, string> = {
   nav_home: 'Inicio', nav_transactions: 'Transacciones', nav_news: 'Noticias', nav_profile: 'Perfil',
-  admin_panel: 'Panel de administración', welcome_back: 'Bienvenido de nuevo', light_mode: 'Modo claro', dark_mode: 'Modo oscuro',
+  admin_panel: 'Panel de administración', welcome_back: 'Bienvenido de nuevo', light_mode: 'Modo claro', dark_mode: 'Modo oscuro', theme_system: 'Tema del sistema',
   total_balance: 'Saldo total', total: 'Total', available: 'Disponible', locked: 'Bloqueado', in_crypto: 'En cripto',
   verified: 'Verificado', non_kyc: 'Sin KYC', level: 'Nivel', upgrade: 'Mejorar',
   crypto_market: 'Mercado cripto', view_all: 'Ver todo', live_prices: 'Precios en vivo · CoinGecko',
@@ -181,7 +181,7 @@ const es: Record<string, string> = {
 }
 const pt: Record<string, string> = {
   nav_home: 'Início', nav_transactions: 'Transações', nav_news: 'Notícias', nav_profile: 'Perfil',
-  admin_panel: 'Painel do administrador', welcome_back: 'Bem-vindo de volta', light_mode: 'Modo claro', dark_mode: 'Modo escuro',
+  admin_panel: 'Painel do administrador', welcome_back: 'Bem-vindo de volta', light_mode: 'Modo claro', dark_mode: 'Modo escuro', theme_system: 'Tema do sistema',
   total_balance: 'Saldo total', total: 'Total', available: 'Disponível', locked: 'Bloqueado', in_crypto: 'Em cripto',
   verified: 'Verificado', non_kyc: 'Sem KYC', level: 'Nível', upgrade: 'Fazer upgrade',
   crypto_market: 'Mercado cripto', view_all: 'Ver tudo', live_prices: 'Preços ao vivo · CoinGecko',
@@ -228,7 +228,7 @@ const pt: Record<string, string> = {
 }
 const fr: Record<string, string> = {
   nav_home: 'Accueil', nav_transactions: 'Transactions', nav_news: 'Actualités', nav_profile: 'Profil',
-  admin_panel: "Panneau d'administration", welcome_back: 'Bon retour', light_mode: 'Mode clair', dark_mode: 'Mode sombre',
+  admin_panel: "Panneau d'administration", welcome_back: 'Bon retour', light_mode: 'Mode clair', dark_mode: 'Mode sombre', theme_system: 'Thème système',
   total_balance: 'Solde total', total: 'Total', available: 'Disponible', locked: 'Bloqué', in_crypto: 'En crypto',
   verified: 'Vérifié', non_kyc: 'Sans KYC', level: 'Niveau', upgrade: 'Améliorer',
   crypto_market: 'Marché crypto', view_all: 'Tout voir', live_prices: 'Prix en direct · CoinGecko',
@@ -276,7 +276,7 @@ const fr: Record<string, string> = {
 
 const hi: Record<string, string> = {
   nav_home: 'होम', nav_transactions: 'लेन-देन', nav_news: 'समाचार', nav_profile: 'प्रोफ़ाइल',
-  admin_panel: 'एडमिन पैनल', welcome_back: 'फिर से स्वागत है', light_mode: 'लाइट मोड', dark_mode: 'डार्क मोड',
+  admin_panel: 'एडमिन पैनल', welcome_back: 'फिर से स्वागत है', light_mode: 'लाइट मोड', dark_mode: 'डार्क मोड', theme_system: 'सिस्टम थीम',
   total_balance: 'कुल बैलेंस', total: 'कुल', available: 'उपलब्ध', locked: 'लॉक किया गया', in_crypto: 'क्रिप्टो में',
   verified: 'सत्यापित', non_kyc: 'नॉन KYC', level: 'स्तर', upgrade: 'अपग्रेड',
   crypto_market: 'क्रिप्टो मार्केट', view_all: 'सभी देखें', live_prices: 'लाइव कीमतें · CoinGecko',
@@ -323,7 +323,7 @@ const hi: Record<string, string> = {
 }
 const ru: Record<string, string> = {
   nav_home: 'Главная', nav_transactions: 'Транзакции', nav_news: 'Новости', nav_profile: 'Профиль',
-  admin_panel: 'Панель администратора', welcome_back: 'С возвращением', light_mode: 'Светлая тема', dark_mode: 'Тёмная тема',
+  admin_panel: 'Панель администратора', welcome_back: 'С возвращением', light_mode: 'Светлая тема', dark_mode: 'Тёмная тема', theme_system: 'Системная тема',
   total_balance: 'Общий баланс', total: 'Итого', available: 'Доступно', locked: 'Заблокировано', in_crypto: 'В криптовалюте',
   verified: 'Подтверждено', non_kyc: 'Без KYC', level: 'Уровень', upgrade: 'Повысить',
   crypto_market: 'Крипторынок', view_all: 'Смотреть всё', live_prices: 'Цены в реальном времени · CoinGecko',

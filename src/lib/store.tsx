@@ -73,7 +73,7 @@ const saveSessionId = (r: any) => { try { if (r?.sessionId) localStorage.setItem
 
 export interface Toast { id: string; title: string; body?: string; kind: 'success' | 'error' | 'info' }
 interface Ctx {
-  db: DB; user: User | null; theme: 'light' | 'dark'; toggleTheme: () => void
+  db: DB; user: User | null; theme: 'light' | 'dark'; themePref: 'system' | 'light' | 'dark'; setThemePref: (p: 'system' | 'light' | 'dark') => void; toggleTheme: () => void
   lang: string; setLanguage: (code: string) => void; t: (key: string) => string
   currency: string; currencyIsAuto: boolean; detectedCurrency: string; setCurrency: (code: string | null) => void; fmtMoney: (bdt: number) => string; fmtAmount: (bdt: number) => string; toBDT: (amount: number) => number; fromBDT: (bdt: number) => number
   toasts: Toast[]; toast: (t: Omit<Toast, 'id'>) => void; dismissToast: (id: string) => void
@@ -217,7 +217,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (busyRef.current) return 'A transaction is already processing — please wait for it to finish.' as unknown as R // surfaced as the error string by actions that return one; ignored by void actions
     return withBusy(label, () => fn(...args))
   }
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nova.theme') as any) || 'dark')
+  // Theme preference: 'system' follows the device (prefers-color-scheme)
+  // live; 'light'/'dark' are manual choices. Saved values from before
+  // this existed are 'light'/'dark' and stay as manual choices; no saved
+  // value means 'system'. The preference persists in localStorage.
+  const [themePref, setThemePrefState] = useState<'system' | 'light' | 'dark'>(() => {
+    const v = localStorage.getItem('nova.theme')
+    return v === 'light' || v === 'dark' ? v : 'system'
+  })
+  const [systemDark, setSystemDark] = useState<boolean>(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true)
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const fn = (e: MediaQueryListEvent) => setSystemDark(e.matches)
+    setSystemDark(mq.matches)
+    mq.addEventListener('change', fn)
+    return () => mq.removeEventListener('change', fn)
+  }, [])
+  const theme: 'light' | 'dark' = themePref === 'system' ? (systemDark ? 'dark' : 'light') : themePref
+  const setThemePref = useCallback((p: 'system' | 'light' | 'dark') => setThemePrefState(p), [])
   const [langPref, setLangPref] = useState<string>(() => localStorage.getItem('nova.lang') || 'en')
   const [currencyPref, setCurrencyPref] = useState<string | null>(() => localStorage.getItem('nova.currency'))
   const [rates, setRates] = useState<Record<string, number>>(FALLBACK_RATES)
@@ -233,9 +250,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(db)) }, [db])
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
-    localStorage.setItem('nova.theme', theme)
-  }, [theme])
-  const toggleTheme = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), [])
+    localStorage.setItem('nova.theme', themePref)
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#020617' : '#f8fafc')
+  }, [theme, themePref])
+  const toggleTheme = useCallback(() => setThemePrefState(p => (p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system')), [])
 
   const toast = useCallback((t: Omit<Toast, 'id'>) => {
     const id = rid(); setToasts(x => [...x, { ...t, id }])
@@ -1556,7 +1575,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetDemo = () => { const fresh = seedDB(); localStorage.setItem(KEY, JSON.stringify(fresh)); setDb(fresh) }
 
   const value: Ctx = {
-    db, user, theme, toggleTheme, toasts, toast, dismissToast, login, register, walletOf,
+    db, user, theme, themePref, setThemePref, toggleTheme, toasts, toast, dismissToast, login, register, walletOf,
     addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing withdrawal…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
     applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,

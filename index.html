@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply the theme before first paint: a saved manual choice wins,
+      // otherwise follow the device (prefers-color-scheme).
+      try {
+        var p = localStorage.getItem('nova.theme');
+        var dark = p === 'dark' || (p !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
     <title>NovaWallet — Crypto Wallet & Digital Finance Platform</title>
     <meta name="description" content="NovaWallet is a secure crypto wallet and digital finance platform: send and receive money instantly, buy, sell and swap 30+ cryptocurrencies, stake to earn up to 16% APY, apply for instant loans, and earn daily rewards — all in one app." />
     <meta name="keywords" content="NovaWallet, crypto wallet, digital wallet, buy bitcoin, buy USDT, crypto staking, send money online, instant loan, earn rewards, digital finance" />

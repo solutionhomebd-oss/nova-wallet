@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Bell, Home, LogOut, Moon, Newspaper, ShieldCheck, Sun, User as UserIcon, ArrowLeftRight } from 'lucide-react'
+import { Bell, Home, LogOut, MonitorSmartphone, Moon, Newspaper, ShieldCheck, Sun, User as UserIcon, ArrowLeftRight } from 'lucide-react'
 import LogoMark from './LogoMark'
 import { useApp } from '../lib/store'
 import { useConfirm } from './ui'
@@ -19,7 +19,9 @@ export function Logo({ size = 34 }: { size?: number }) {
   )
 }
 export default function Layout() {
-  const { user, db, theme, toggleTheme, t, lockNow } = useApp()
+  const { user, db, themePref, toggleTheme, t, lockNow } = useApp()
+  const themeIcon = themePref === 'system' ? <MonitorSmartphone size={18} /> : themePref === 'light' ? <Sun size={18} /> : <Moon size={18} />
+  const themeLabel = themePref === 'system' ? t('theme_system') : themePref === 'light' ? t('light_mode') : t('dark_mode')
   const navigate = useNavigate()
   const confirm = useConfirm()
   const askLogout = () => confirm.confirm({ title: 'Log out?', body: 'Your login stays saved on this device — unlock again any time with your PIN, fingerprint or password.', confirmLabel: 'Log out', onConfirm: () => { lockNow() } })
@@ -41,8 +43,8 @@ export default function Layout() {
             </NavLink>
           )}
         </nav>
-        <button onClick={toggleTheme} className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold bg-slate-100 dark:bg-slate-800">
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} {theme === 'dark' ? t('light_mode') : t('dark_mode')}
+        <button onClick={toggleTheme} title={themeLabel} className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold bg-slate-100 dark:bg-slate-800">
+          {themeIcon} {themeLabel}
         </button>
         <button onClick={askLogout} className="mt-2 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition">
           <LogOut size={18} /> {t('logout')}
@@ -55,7 +57,7 @@ export default function Layout() {
             <div className="lg:hidden"><Logo size={30} /></div>
             <div className="hidden lg:block text-sm text-slate-500">{t('welcome_back')}, <span className="font-bold text-slate-800 dark:text-slate-100">{user?.name.split(' ')[0]}</span></div>
             <div className="flex items-center gap-2">
-              <button onClick={toggleTheme} className="lg:hidden p-2.5 rounded-full bg-slate-100 dark:bg-slate-800">{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
+              <button onClick={toggleTheme} title={themeLabel} className="lg:hidden p-2.5 rounded-full bg-slate-100 dark:bg-slate-800">{themeIcon}</button>
               <button onClick={() => navigate('/notifications')} className="relative p-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
                 <Bell size={18} />
                 {unread > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">{unread}</span>}

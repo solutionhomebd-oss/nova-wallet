@@ -502,6 +502,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.phone !== undefined) lu.phone = state.profile.phone
       if (state.profile.email) lu.email = state.profile.email
       if (state.profile.emailVerified !== undefined) lu.emailVerified = state.profile.emailVerified
+      if (state.profile.pinHash) lu.pinHash = state.profile.pinHash
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
@@ -1710,6 +1711,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await apiPost('/v1/admin/reset-pin', { userId: suid, pin })
       applyMoneyResult(r)
+      // Resetting the signed-in user's OWN PIN (an admin fixing their own
+      // account from this device): teach the local copy the new PIN at
+      // once and clear any local failed-attempt lock. Money actions verify
+      // the PIN against the local hash first, so a stale local hash would
+      // keep rejecting the brand-new PIN until the next full login. (Other
+      // users' devices heal via the pinHash in the /v1/state profile.)
+      if (user && (userId2 === user.id || suid === (user.fbUid ?? user.id))) {
+        mutate(d => { const du = d.users.find(x => x.id === user.id); if (du) { du.pinHash = hashSecret(pin); if (d.sec?.[du.id]) d.sec[du.id] = { fails: 0, lockedUntil: 0 } } })
+      }
       return null
     } catch (e: any) { return e.message || 'PIN reset failed.' }
   }

@@ -406,6 +406,7 @@ async function loadState(db, uid, lite = false) {
       id: me.id, email: me.email, username: me.username, name: me.full_name || "",
       phone: me.phone || "", ...(me.avatar_url ? { photo: me.avatar_url } : {}),
       role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code, emailVerified: Number(me.email_verified) === 1,
+      pinHash: me.pin_hash || "",
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
       ...(kycRow ? { kycDocType: kycRow.doc_type, kycDocNumber: kycRow.doc_number, kycSubmittedAt: isoOf(kycRow.created_at) } : {}),

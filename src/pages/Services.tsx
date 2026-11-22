@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CheckCircle2, Copy, Download, Share2, Upload, XCircle } from 'lucide-react'
+import { CheckCircle2, Copy, Download, Share2, Upload, XCircle, Zap } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useApp } from '../lib/store'
 import { Avatar, Badge, Btn, Card, CheckLine, CopyBtn, Empty, FeatureOff, Input, Modal, PinField, Select, StepBar, StepUpField, WizardNav, statusTone , MaxBtn } from '../components/ui'
@@ -302,11 +302,15 @@ export function SendMoney() {
   const [q, setQ] = useState(''); const [to, setTo] = useState<User | null>(null)
   const [sstep, setSstep] = useState(0)
   const [amount, setAmount] = useState(''); const [note, setNote] = useState(''); const [receipt, setReceipt] = useState<any>(null); const [errMsg, setErrMsg] = useState('')
-  const results = useMemo(() => {
-    if (!q.trim()) return []
+  // Recipient lookup is EXACT-username only (owner's order): no live
+  // dropdown of partial matches. A full username that exists shows a green
+  // tick beside the field; anything else shows a red cross.
+  const match = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return db.users.filter(u => u.id !== user?.id && u.role === 'user' && (u.username.includes(s) || u.email.includes(s) || u.id.toLowerCase().includes(s) || u.name.toLowerCase().includes(s))).slice(0, 5)
+    if (!s) return null
+    return db.users.find(u => u.id !== user?.id && u.role === 'user' && u.username.toLowerCase() === s) ?? null
   }, [q, db.users, user])
+  useEffect(() => { setTo(match) }, [match])
   const amt = Number(amount) || 0
   const amtBDT = Math.round(toBDT(amt))
   const discS = db.levels.find(l => l.level === user?.level)?.feeDiscountPct ?? 0
@@ -324,26 +328,26 @@ export function SendMoney() {
   return (
     <div>
       <PageHead title={t('send_title')} sub={`Fee ${Number(effPctS.toFixed(2))}%${discS ? ` (Level ${user?.level} −${discS}%)` : ''} · ${t('available')} ${fmtMoney(w?.available ?? 0)}`} />
+      <div className="mb-4 rounded-3xl bg-gradient-to-br from-violet-500 to-purple-600 text-white p-4 flex items-start gap-3 shadow-lg">
+        <Zap size={22} className="shrink-0 mt-0.5" />
+        <p className="text-sm font-semibold leading-relaxed">{t('send_banner')}</p>
+      </div>
       <Card className="p-5">
         <StepBar steps={['Recipient & amount', 'Review', 'Confirm']} current={sstep} />
         {sstep === 0 && (
           <div className="space-y-4 anim-fade-up">
-            <Input label={t('search_recipient')} placeholder="e.g. arif, arif@gmail.com, USR-…" value={q} onChange={e => { setQ(e.target.value); setTo(null) }} />
-            {results.length > 0 && !to && (
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
-                {results.map(u => (
-                  <button key={u.id} onClick={() => setTo(u)} className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-left">
-                    <Avatar name={u.name} size={36} photo={u.photo} />
-                    <span><span className="block font-bold text-sm">{u.name}</span><span className="text-xs text-slate-400">@{u.username} · {u.id}</span></span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="relative">
+              <Input label={t('send_username')} placeholder="Type the full username, e.g. arif92" value={q} onChange={e => setQ(e.target.value)} className="pr-11" />
+              {q.trim() && (match
+                ? <CheckCircle2 size={22} className="absolute right-3.5 bottom-3.5 text-emerald-500 pointer-events-none" />
+                : <XCircle size={22} className="absolute right-3.5 bottom-3.5 text-rose-500 pointer-events-none" />)}
+            </div>
+            {q.trim() && !match && <p className="-mt-2 text-xs font-semibold text-rose-500">No account with that exact username — check the spelling.</p>}
             {to && (
               <div className="rounded-2xl bg-violet-50 dark:bg-violet-500/10 p-4 flex items-center gap-3">
                 <Avatar name={to.name} size={44} photo={to.photo} />
                 <div className="flex-1"><p className="font-bold">{to.name} {to.kyc === 'verified' && '✅'}</p><p className="text-xs text-slate-500">@{to.username} · {to.email} · {to.id}</p></div>
-                <button onClick={() => setTo(null)} className="text-xs font-bold text-violet-600">Change</button>
+                <button onClick={() => setQ('')} className="text-xs font-bold text-violet-600">Change</button>
               </div>
             )}
             {to && to.level < 2 && (

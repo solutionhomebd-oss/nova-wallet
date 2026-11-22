@@ -2667,7 +2667,7 @@ export default {
     // Email-OTP password reset (public: the user is logged out). The OTP
     // itself is generated, hashed and verified server-side; the email goes
     // out over Gmail SMTP when the SMTP secrets are configured.
-    if ((path.startsWith("/v1/password/") || path.startsWith("/v1/verify-email/")) && request.method === "POST") {
+    if ((path.startsWith("/v1/password/") || path.startsWith("/v1/verify-email/") || path.startsWith("/v1/username/")) && request.method === "POST") {
       let b = {};
       try { b = await request.json(); } catch { /* ignore */ }
       if (path === "/v1/password/request-otp") return await handlePasswordRequestOtp(request, env, b);

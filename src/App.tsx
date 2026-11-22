@@ -30,6 +30,7 @@ const DirectWithdraw = lazyNamed(() => import('./pages/Extras'), 'DirectWithdraw
 const SupportListPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportListPage')
 const SupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportChatPage')
 const AdminSupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'AdminSupportChatPage')
+const AdminUserPage = lazyNamed(() => import('./pages/Admin'), 'AdminUserPage')
 const EarnPage = lazyNamed(() => import('./pages/Extras'), 'EarnPage')
 const SwapPage = lazyNamed(() => import('./pages/Extras'), 'SwapPage')
 const TradePage = lazyNamed(() => import('./pages/Extras'), 'TradePage')
@@ -184,6 +185,7 @@ export default function App() {
             <Route path="/support" element={<SupportListPage />} />
             <Route path="/support/:ticketId" element={<SupportChatPage />} />
             <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
+            <Route path="/admin/users/:userId" element={<Guard admin><Suspense fallback={<div className="p-8 text-center">Loading user…</div>}><AdminUserPage /></Suspense></Guard>} />
             <Route path="/withdraw" element={<DirectWithdraw />} />
             <Route path="/earn" element={<EarnPage />} />
             <Route path="/earn/checkin" element={<CheckinPage />} />

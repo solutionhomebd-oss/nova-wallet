@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Check, KeyRound, Loader2, Mail, MoreVertical, Send, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, Info, KeyRound, Loader2, Mail, MoreVertical, ShieldCheck, Trash2 } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
 import { Avatar, Badge, Btn, Card, Empty, Input, MsgTicks } from '../components/ui'
@@ -110,7 +110,7 @@ export function SupportListPage() {
     setStarting(false)
     if (err) return toast({ kind: 'error', title: err })
     setForm({ subject: '', message: '' })
-    toast({ kind: 'success', title: 'Support chat started', body: 'Status: Pending — we usually reply within 24 hours.' })
+    toast({ kind: 'success', title: 'Support chat started', body: 'Status: Pending — we usually reply within 1 hour.' })
   }
   return (
     <div>
@@ -118,7 +118,7 @@ export function SupportListPage() {
         <button onClick={() => navigate('/profile')} className="w-9 h-9 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0"><ArrowLeft size={17} /></button>
         <div>
           <h1 className="font-extrabold text-lg leading-tight">{t('p_support')}</h1>
-          <p className="text-xs text-slate-500">Chat with our support team — we usually reply within 24 hours.</p>
+          <p className="text-xs text-slate-500">Chat with our support team — we usually reply within 1 hour.</p>
         </div>
       </div>
       <Card className="p-5 mb-5">
@@ -180,11 +180,11 @@ export function SupportChatPage() {
         {tk && statusBadge(tk.status)}
       </div>
       {!tk ? (
-        <Card className="p-6"><Empty title="Chat not available" body="This conversation may have been closed or deleted." /></Card>
+        <Card className="p-6"><Empty title="Chat not available" body="This conversation may have been deleted, or it belongs to another account." /></Card>
       ) : (
         <>
           <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto rounded-3xl bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-2.5 mb-3">
-            <ChatMessages tk={tk} selfFrom="user" otherName={t('chat_team')} />
+            <ChatMessages tk={tk} selfFrom="user" otherName="Support" />
           </div>
           {tk.status === 'resolved' ? (
             <div className="shrink-0">
@@ -200,7 +200,7 @@ export function SupportChatPage() {
           ) : (
             <div className="flex gap-2 shrink-0">
               <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder={t('chat_placeholder')} className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
-              <Btn className="!px-4 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</Btn>
+              <Btn className="!px-5 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : t('chat_send')}</Btn>
             </div>
           )}
         </>
@@ -209,7 +209,7 @@ export function SupportChatPage() {
   )
 }
 
-/* ---------------- Admin: full-page chat with options panel ---------------- */
+/* ---------------- Admin: full-page chat ---------------- */
 
 export function AdminSupportChatPage() {
   const { db, user, markTicketRead, resolveTicket, deleteTicket, startChatVerify, setChatVerify, sendChatPin, toast, walletOf, fmtMoney } = useApp()
@@ -219,18 +219,27 @@ export function AdminSupportChatPage() {
   const tku = tk ? db.users.find(u => u.id === tk.userId) : undefined
   const { text, setText, sending, send } = useChatSend(tk, 'admin')
   const scrollRef = useScrollToBottom(tk?.messages.length)
-  const [delArm, setDelArm] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
   const [menuDelArm, setMenuDelArm] = useState(false)
   const [menuBusy, setMenuBusy] = useState('')
   const [tplOpen, setTplOpen] = useState(false)
   const [canned, setCanned] = useState<{ id: string; title: string; text: string }[] | null>(null)
   const [tplForm, setTplForm] = useState<{ id?: string; title: string; text: string } | null>(null)
   const [tplBusy, setTplBusy] = useState(false)
+  useEffect(() => { if (ticketId) void markTicketRead(ticketId, true) }, [ticketId])
+  useEffect(() => { setMenuOpen(false); setMenuDelArm(false); setInfoOpen(false) }, [ticketId])
   useEffect(() => {
-    if (!tplOpen || canned !== null) return
-    apiGet('/v1/admin/overview').then((r: any) => { const ov = r.overview ?? r; setCanned(ov.cannedReplies ?? []) }).catch(() => setCanned([]))
-  }, [tplOpen, canned])
+    if (!menuDelArm) return
+    const id = window.setTimeout(() => setMenuDelArm(false), 4000)
+    return () => window.clearTimeout(id)
+  }, [menuDelArm])
+  // Quick replies are prefetched on mount from the light endpoint, so the
+  // panel opens instantly (the full admin overview is far too heavy).
+  useEffect(() => {
+    if (canned !== null) return
+    apiGet('/v1/admin/canned').then((r: any) => setCanned(r.cannedReplies ?? [])).catch(() => setCanned([]))
+  }, [canned])
   const saveCanned = async () => {
     if (!tplForm || tplBusy) return
     if (!tplForm.title.trim() || !tplForm.text.trim()) return toast({ kind: 'error', title: 'Write a title and the reply text' })
@@ -243,18 +252,6 @@ export function AdminSupportChatPage() {
     try { const r: any = await apiPost('/v1/admin/canned/delete', { id }); const ov = r.overview ?? r; setCanned(ov.cannedReplies ?? []) }
     catch (e: any) { toast({ kind: 'error', title: e.message }) }
   }
-  useEffect(() => { if (ticketId) void markTicketRead(ticketId, true) }, [ticketId])
-  useEffect(() => { setDelArm(false); setMenuOpen(false); setMenuDelArm(false) }, [ticketId])
-  useEffect(() => {
-    if (!delArm) return
-    const id = window.setTimeout(() => setDelArm(false), 4000)
-    return () => window.clearTimeout(id)
-  }, [delArm])
-  useEffect(() => {
-    if (!menuDelArm) return
-    const id = window.setTimeout(() => setMenuDelArm(false), 4000)
-    return () => window.clearTimeout(id)
-  }, [menuDelArm])
   if (!user || user.role !== 'admin') return <Card className="p-6"><Empty title="Admins only" body="This page is part of the admin panel." /></Card>
   const runMenu = async (key: string, fn: () => Promise<string | null>, okTitle: string, okBody?: string) => {
     if (menuBusy) return
@@ -275,21 +272,33 @@ export function AdminSupportChatPage() {
           <p className="font-extrabold truncate">{tk?.subject ?? 'Support chat'}</p>
           <p className="text-xs text-slate-400 truncate">{tku?.name} · @{tku?.username} · {tku?.email}</p>
         </div>
-        {tk?.verifyStatus === 'verified' && <Badge tone="green">✅ Verified</Badge>}
-        {tk && statusBadge(tk.status)}
-        {tk && tk.status !== 'resolved' && <button onClick={() => { resolveTicket(tk.id); toast({ kind: 'success', title: 'Chat resolved & closed' }) }} title="Mark resolved" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-white bg-emerald-500 hover:bg-emerald-400 active:scale-[.98] transition"><Check size={16} strokeWidth={3} /></button>}
-        {tk && (delArm ? (
-          <button onClick={() => { deleteTicket(tk.id); toast({ kind: 'success', title: 'Chat deleted', body: 'The whole conversation was removed.' }); navigate('/admin?tab=support') }} title="Tap again to delete this chat" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-white bg-rose-600 hover:bg-rose-500 active:scale-[.98] transition"><Check size={16} strokeWidth={3} /></button>
-        ) : (
-          <button onClick={() => setDelArm(true)} title="Delete this chat" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-rose-500 border border-rose-300/60 dark:border-rose-500/40 hover:bg-rose-50 dark:hover:bg-rose-500/10 active:scale-[.98] transition"><Trash2 size={15} /></button>
-        ))}
         {tk && (
           <div className="relative shrink-0">
             <button onClick={() => { setMenuOpen(o => !o); setMenuDelArm(false) }} title="Chat menu" className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center"><MoreVertical size={18} /></button>
             {menuOpen && (
               <>
                 <button aria-hidden className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-12 z-40 w-64 rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 overflow-hidden anim-fade-up">
+                <div className="absolute right-0 top-12 z-40 w-64 rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 overflow-hidden anim-fade-up max-h-[75vh] overflow-y-auto">
+                  <button className={menuItem} onClick={() => setInfoOpen(o => !o)}>
+                    <Info size={17} className="text-sky-500" />
+                    <span className="flex-1">Info<span className="block text-[11px] font-semibold text-slate-400">Customer & chat details</span></span>
+                  </button>
+                  {infoOpen && tku && (
+                    <div className="mx-3 mb-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 px-3.5 py-2.5 space-y-1.5">
+                      {[
+                        ['Status', tk.status],
+                        ['Route', tk.route ?? 'general'],
+                        ['Verified', tk.verifyStatus === 'verified' ? 'Yes' : 'No'],
+                        ['Level', String(tku.level)],
+                        ['KYC', tku.kyc],
+                        ['Balance', fmtMoney(walletOf(tku.id)?.available ?? 0)],
+                        ['Open chats', String(db.tickets.filter(x => x.userId === tku.id && x.status !== 'resolved').length)],
+                        ...(tk.rating ? [['Rating', tk.rating === 'good' ? '👍 Good' : '👎 Bad']] : []),
+                      ].map(([k, v]) => (
+                        <p key={k} className="flex justify-between gap-3 text-xs"><span className="font-semibold text-slate-400">{k}</span><span className="font-bold capitalize text-right">{v}</span></p>
+                      ))}
+                    </div>
+                  )}
                   <button className={menuItem} disabled={!!menuBusy} onClick={() => runMenu('verify', () => setChatVerify(tk.id, tk.verifyStatus !== 'verified'), tk.verifyStatus === 'verified' ? 'Marked as Unverified' : 'Marked as Verified')}>
                     <ShieldCheck size={17} className={tk.verifyStatus === 'verified' ? 'text-emerald-500' : 'text-slate-400'} />
                     <span className="flex-1">{tk.verifyStatus === 'verified' ? 'Verified' : 'Unverified'}<span className="block text-[11px] font-semibold text-slate-400">{tk.verifyStatus === 'verified' ? 'Tap to mark unverified' : 'Tap to mark verified manually'}</span></span>
@@ -328,13 +337,6 @@ export function AdminSupportChatPage() {
           </div>
         )}
       </div>
-      {tk && tku && (
-        <div className="flex gap-1.5 flex-wrap mb-3 shrink-0">
-          {['Route: ' + (tk.route ?? 'general'), 'Level ' + tku.level, 'KYC: ' + tku.kyc, 'Balance: ' + fmtMoney(walletOf(tku.id)?.available ?? 0), db.tickets.filter(x => x.userId === tku.id && x.status !== 'resolved').length + ' open chat(s)'].map(chip => (
-            <span key={chip} className="px-2.5 py-1 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-500 capitalize">{chip}</span>
-          ))}
-        </div>
-      )}
       {!tk ? (
         <Card className="p-6"><Empty title="Chat not available" body="This conversation may have been deleted." /></Card>
       ) : (
@@ -346,26 +348,6 @@ export function AdminSupportChatPage() {
             <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3 shrink-0">This chat is resolved and closed. The customer must open a new chat for further help.</p>
           ) : (
             <div className="shrink-0">
-              {(() => {
-                const lastUser = [...tk.messages].reverse().find(m => m.from === 'user')?.text.toLowerCase() ?? ''
-                const sug: string[] = []
-                if (lastUser.includes('pin')) sug.push("I've sent your current PIN in this chat — it's visible only to you. Please keep it private and never share it with anyone.")
-                if (lastUser.includes('otp') || lastUser.includes('code') || lastUser.includes('verify')) sug.push("For your security, I've sent a verification code to your email — please send it here in the chat.")
-                if (lastUser.includes('deposit') || lastUser.includes('add money')) sug.push("Please share your deposit details: the amount, the payment method, and the transaction ID.")
-                if (lastUser.includes('withdraw') || lastUser.includes('cash out') || lastUser.includes('cashout')) sug.push("Please share the withdrawal amount and the TXN ID so I can check its status for you.")
-                if (lastUser.includes('loan')) sug.push("Please share your loan details and tell me what you need help with — application, repayment or closing.")
-                if (lastUser.includes('kyc')) sug.push("You can complete KYC from Profile → KYC verification. If it was rejected, please re-upload a clear photo of your document.")
-                if (tk.subject === 'Transaction Problem') sug.push("Please share the transaction ID (it starts with TXN-) so I can check it for you right away.")
-                sug.push("Thanks for reaching out — I'm checking this for you now.")
-                sug.push("This should be fixed now. Please fully close and reopen the app, then try again.")
-                return (
-                  <div className="flex gap-1.5 flex-wrap mb-2">
-                    {sug.slice(0, 3).map(x => (
-                      <button key={x} onClick={() => setText(x)} title={x} className="max-w-full px-3 py-1.5 rounded-full bg-violet-50 dark:bg-violet-500/10 border border-violet-200/70 dark:border-violet-500/30 text-[11px] font-bold text-violet-700 dark:text-violet-300 truncate">✨ {x}</button>
-                    ))}
-                  </div>
-                )
-              })()}
               <div className="flex gap-2">
                 <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder="Type your reply…" className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
                 <button onClick={() => setTplOpen(o => !o)} title="Quick replies" className={`shrink-0 w-11 rounded-2xl border flex items-center justify-center ${tplOpen ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-500'}`}><BookOpen size={17} /></button>

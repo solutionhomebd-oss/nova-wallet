@@ -1409,6 +1409,13 @@ const DEFAULT_CANNED = [
   { id: "cr-more", title: "Ask for details", text: "Could you tell me a bit more about the problem? When did it happen, and what exactly did you see on screen?" },
   { id: "cr-fixed", title: "Fixed — retry", text: "This should be fixed now. Please fully close and reopen the app, then try again — and let me know if it works." },
   { id: "cr-thanks", title: "Thank you", text: "Thank you for your patience 🙏 Is there anything else I can help you with?" },
+  { id: "cr-checking", title: "Checking now", text: "Thanks for reaching out — I'm checking this for you now." },
+  { id: "cr-pin", title: "PIN sent", text: "I've sent your current PIN in this chat — it's visible only to you. Please keep it private and never share it with anyone." },
+  { id: "cr-code", title: "Verification code sent", text: "For your security, I've sent a verification code to your email — please send it here in the chat." },
+  { id: "cr-deposit", title: "Deposit details", text: "Please share your deposit details: the amount, the payment method, and the transaction ID." },
+  { id: "cr-withdraw", title: "Withdrawal status", text: "Please share the withdrawal amount and the TXN ID so I can check its status for you." },
+  { id: "cr-loan", title: "Loan help", text: "Please share your loan details and tell me what you need help with — application, repayment or closing." },
+  { id: "cr-kyc-help", title: "KYC help", text: "You can complete KYC from Profile → KYC verification. If it was rejected, please re-upload a clear photo of your document." },
 ];
 
 async function handleTicketCreate(request, env, auth, body) {
@@ -1430,7 +1437,7 @@ async function handleTicketCreate(request, env, auth, body) {
   await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'user', ?)")
     .bind(pubId("MSG"), id, message).run();
   await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)")
-    .bind(pubId("MSG"), id, "👋 Thanks for contacting NovaWallet Support! We've received your message — our team usually replies within 24 hours. For your safety: our team will never ask for your password.").run();
+    .bind(pubId("MSG"), id, "👋 Thanks for contacting NovaWallet Support! We've received your message — our team usually replies within 1 hour. For your safety: our team will never ask for your password.").run();
   const me = await getUserRow(db, auth.uid);
   await notifyAdminsServer(db, "support", "New support chat", (me?.username || "A user") + " opened a support chat: " + subject, "/admin?tab=support", route);
   if (route === "security") {
@@ -1549,7 +1556,7 @@ async function supportSweep(db, env) {
   // nudge (admin replied, user silent for 24h).
   const open = await db.prepare("SELECT id, user_id, subject, status, updated_at, sla_alerted_at, nudged_at FROM support_tickets WHERE status != 'resolved' LIMIT 100").all();
   for (const t of open.results) {
-    const lastMsg = await db.prepare("SELECT sender, created_at FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(t.id).first();
+    const lastMsg = await db.prepare("SELECT sender, created_at FROM ticket_messages WHERE ticket_id = ? AND sender != 'system' ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(t.id).first();
     if (!lastMsg) continue;
     const lastAt = new Date(String(lastMsg.created_at).replace(" ", "T") + "Z").getTime();
     const updatedAt = new Date(String(t.updated_at || "").replace(" ", "T") + "Z").getTime();
@@ -2927,6 +2934,10 @@ export default {
       if (path === "/v1/admin/overview" && request.method === "GET") {
         if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);
         return json(request, { ok: true, overview: await loadOverview(env.DB) });
+      }
+      if (path === "/v1/admin/canned" && request.method === "GET") {
+        if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+        return json(request, { ok: true, cannedReplies: (await getSettingKey(env.DB, "canned_replies", null)) || DEFAULT_CANNED });
       }
       if (path.startsWith("/v1/admin/kyc/") && request.method === "GET") {
         if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);

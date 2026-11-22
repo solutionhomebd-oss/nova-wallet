@@ -18,6 +18,39 @@ export const SUPPORT_SUBJECTS = [
 
 const statusBadge = (st: string) => st === 'pending' ? <Badge tone="amber">Pending</Badge> : st === 'processing' ? <Badge tone="violet">Processing</Badge> : <Badge tone="green">Resolved</Badge>
 
+// The PIN card works like a scratch card on the user's side: the PIN
+// stays masked until the user taps, and it hides itself again after
+// 10 seconds. Admins always see **** (the server never sends them the
+// real PIN in the first place).
+function PinCard({ value, selfFrom }: { value: string; selfFrom: 'user' | 'admin' }) {
+  const { t } = useApp()
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    if (!shown) return
+    const id = window.setTimeout(() => setShown(false), 10000)
+    return () => window.clearTimeout(id)
+  }, [shown])
+  if (selfFrom === 'admin') return (
+    <div className="flex justify-center px-2">
+      <div className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
+        <p className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">🔐 Transaction PIN sent to the user</p>
+        <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">****</p>
+        <p className="text-[11px] font-semibold leading-relaxed mt-1.5 opacity-90">Hidden for privacy — only the user can see their PIN.</p>
+      </div>
+    </div>
+  )
+  return (
+    <div className="flex justify-center px-2">
+      <button onClick={() => setShown(x => !x)} className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
+        <p className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">🔐 {t('pin_title')}</p>
+        <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">{shown ? value : '****'}</p>
+        <p className="text-[11px] font-bold leading-relaxed mt-1.5 text-violet-700 dark:text-violet-300">{shown ? t('pin_hint_shown') : t('pin_hint_hidden')}</p>
+        <p className="text-[11px] font-semibold leading-relaxed mt-1 opacity-90">{t('pin_note')}</p>
+      </button>
+    </div>
+  )
+}
+
 // One message list for both chat pages. System messages (verification
 // prompts and results) sit centred at ~75% opacity, as the owner asked;
 // regular bubbles keep the WhatsApp-style layout with read ticks.
@@ -26,18 +59,7 @@ function ChatMessages({ tk, selfFrom, otherName }: { tk: SupportTicket; selfFrom
   return (
     <>
       {tk.messages.map(m => {
-        if (m.from === 'system' && m.text.startsWith('PINSECURE::')) {
-          const pinVal = m.text.slice('PINSECURE::'.length)
-          return (
-            <div key={m.id} className="flex justify-center px-2">
-              <div className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
-                <p className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">{selfFrom === 'user' ? '🔐 Your transaction PIN' : '🔐 Transaction PIN sent to the user'}</p>
-                <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">{selfFrom === 'user' ? pinVal : '****'}</p>
-                <p className="text-[11px] font-semibold leading-relaxed mt-1.5 opacity-90">{selfFrom === 'user' ? 'আপনার পিন এনক্রাইপটেড। এটা আপনি ছাড়া অন্য কেউ দেখতে পারবে না।' : 'Hidden for privacy — only the user can see their PIN.'}</p>
-              </div>
-            </div>
-          )
-        }
+        if (m.from === 'system' && m.text.startsWith('PINSECURE::')) return <PinCard key={m.id} value={m.text.slice('PINSECURE::'.length)} selfFrom={selfFrom} />
         if (m.from === 'system') return (
           <div key={m.id} className="flex justify-center px-2">
             <p className="text-center text-xs font-semibold leading-relaxed px-4 py-2 rounded-2xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">{m.text}</p>

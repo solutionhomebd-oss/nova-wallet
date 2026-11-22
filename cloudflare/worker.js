@@ -1213,7 +1213,9 @@ async function loadTickets(db, uid, stampSide) {
       createdAt: isoOf(t.created_at), updatedAt: isoOf(t.updated_at || t.created_at),
       userReadAt: t.user_read_at ? isoOf(t.user_read_at) : null, adminReadAt: t.admin_read_at ? isoOf(t.admin_read_at) : null,
       userFetchedAt: t.user_fetched_at ? isoOf(t.user_fetched_at) : null, adminFetchedAt: t.admin_fetched_at ? isoOf(t.admin_fetched_at) : null,
-      messages: msgs.results.map((m) => ({ id: m.id, from: m.sender, text: !uid && typeof m.text === "string" && m.text.startsWith("PINSECURE::") ? "PINSECURE::****" : m.text, at: isoOf(m.created_at) })),
+      messages: msgs.results.map((m) => typeof m.text === "string" && m.text.startsWith("PINSECURE::")
+        ? { id: m.id, from: m.sender, text: "PINSECURE::****", pinAvailable: !m.revealed_at, at: isoOf(m.created_at) }
+        : { id: m.id, from: m.sender, text: m.text, at: isoOf(m.created_at) }),
     });
   }
   return out;
@@ -1665,6 +1667,22 @@ async function handleTicketDelete(request, env, auth, body) {
   ]);
   await auditLog(db, auth, "ticket.delete", ticketId + " · " + tk.subject + " · user " + tk.user_id);
   return json(request, { ok: true, overview: await loadOverview(db) });
+}
+
+async function handleTicketPinReveal(request, env, auth, body) {
+  const db = env.DB;
+  const ticketId = String(body.ticketId || "");
+  const messageId = String(body.messageId || "");
+  const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
+  if (!tk) return json(request, { error: "Ticket not found." }, 404);
+  if (tk.user_id !== auth.uid) return json(request, { error: "not_your_ticket" }, 403);
+  const msg = await db.prepare("SELECT * FROM ticket_messages WHERE id = ? AND ticket_id = ?").bind(messageId, ticketId).first();
+  if (!msg || msg.sender !== "system" || typeof msg.text !== "string" || !msg.text.startsWith("PINSECURE::")) return json(request, { error: "PIN message not found." }, 404);
+  // Atomic one-time claim: only the first reveal marks the row, and only
+  // that caller receives the PIN. Every later attempt gets nothing.
+  const upd = await db.prepare("UPDATE ticket_messages SET revealed_at = CURRENT_TIMESTAMP WHERE id = ? AND revealed_at IS NULL").bind(messageId).run();
+  if (!upd.meta || Number(upd.meta.changes || 0) === 0) return json(request, { error: "This PIN was already viewed \u2014 it can't be shown again." }, 409);
+  return json(request, { ok: true, pin: msg.text.slice("PINSECURE::".length) });
 }
 
 async function handleTicketResolve(request, env, auth, body) {
@@ -2976,6 +2994,7 @@ export default {
           case "/v1/sessions/revoke": return await handleSessionRevoke(request, env, auth, body);
           case "/v1/tickets": return await handleTicketCreate(request, env, auth, body);
           case "/v1/tickets/reply": return await handleTicketReply(request, env, auth, body);
+          case "/v1/tickets/pin-reveal": return await handleTicketPinReveal(request, env, auth, body);
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
           case "/v1/admin/tickets/verify-start": return await handleTicketVerifyStart(request, env, auth, body);

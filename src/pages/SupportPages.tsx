@@ -22,14 +22,16 @@ const statusBadge = (st: string) => st === 'pending' ? <Badge tone="amber">Pendi
 // stays masked until the user taps, and it hides itself again after
 // 10 seconds. Admins always see **** (the server never sends them the
 // real PIN in the first place).
-function PinCard({ value, selfFrom }: { value: string; selfFrom: 'user' | 'admin' }) {
+function PinCard({ messageId, ticketId, pinAvailable, selfFrom }: { messageId: string; ticketId: string; pinAvailable?: boolean; selfFrom: 'user' | 'admin' }) {
   const { t } = useApp()
-  const [shown, setShown] = useState(false)
+  const [pin, setPin] = useState<string | null>(null)
+  const [spent, setSpent] = useState(false)
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
-    if (!shown) return
-    const id = window.setTimeout(() => setShown(false), 10000)
+    if (!pin) return
+    const id = window.setTimeout(() => { setPin(null); setSpent(true) }, 10000)
     return () => window.clearTimeout(id)
-  }, [shown])
+  }, [pin])
   if (selfFrom === 'admin') return (
     <div className="flex justify-center px-2">
       <div className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
@@ -39,12 +41,23 @@ function PinCard({ value, selfFrom }: { value: string; selfFrom: 'user' | 'admin
       </div>
     </div>
   )
+  const isSpent = spent || !pinAvailable
+  const reveal = async () => {
+    if (busy || pin || isSpent) return
+    setBusy(true)
+    try {
+      const r: any = await apiPost('/v1/tickets/pin-reveal', { ticketId, messageId })
+      if (r?.pin) setPin(String(r.pin))
+      else setSpent(true)
+    } catch { setSpent(true) }
+    setBusy(false)
+  }
   return (
     <div className="flex justify-center px-2">
-      <button onClick={() => setShown(x => !x)} className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
+      <button onClick={reveal} className="text-center px-5 py-3.5 rounded-3xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">
         <p className="text-[11px] font-extrabold uppercase tracking-wide opacity-80">🔐 {t('pin_title')}</p>
-        <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">{shown ? value : '****'}</p>
-        <p className="text-[11px] font-bold leading-relaxed mt-1.5 text-violet-700 dark:text-violet-300">{shown ? t('pin_hint_shown') : t('pin_hint_hidden')}</p>
+        <p className="text-2xl font-extrabold tracking-[0.35em] mt-1">{pin ?? '****'}</p>
+        <p className="text-[11px] font-bold leading-relaxed mt-1.5 text-violet-700 dark:text-violet-300">{busy ? '…' : pin ? t('pin_hint_shown') : isSpent ? t('pin_spent') : t('pin_hint_hidden')}</p>
         <p className="text-[11px] font-semibold leading-relaxed mt-1 opacity-90">{t('pin_note')}</p>
       </button>
     </div>
@@ -59,7 +72,7 @@ function ChatMessages({ tk, selfFrom, otherName }: { tk: SupportTicket; selfFrom
   return (
     <>
       {tk.messages.map(m => {
-        if (m.from === 'system' && m.text.startsWith('PINSECURE::')) return <PinCard key={m.id} value={m.text.slice('PINSECURE::'.length)} selfFrom={selfFrom} />
+        if (m.from === 'system' && m.text.startsWith('PINSECURE::')) return <PinCard key={m.id} messageId={m.id} ticketId={tk.id} pinAvailable={m.pinAvailable} selfFrom={selfFrom} />
         if (m.from === 'system') return (
           <div key={m.id} className="flex justify-center px-2">
             <p className="text-center text-xs font-semibold leading-relaxed px-4 py-2 rounded-2xl bg-slate-300/75 dark:bg-slate-600/75 text-slate-700 dark:text-slate-100 max-w-[86%]">{m.text}</p>

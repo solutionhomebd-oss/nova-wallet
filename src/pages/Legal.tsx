@@ -28,7 +28,7 @@ function Shell({ icon, title, intro, children }: { icon: React.ReactNode; title:
         <p className="mt-5 text-sm sm:text-[15px] leading-relaxed text-slate-600 dark:text-slate-300">{intro}</p>
         <div className="mt-7 space-y-4">{children}</div>
         <div className="mt-10 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 p-5 text-sm text-slate-500 leading-relaxed">
-          Questions about these terms? Email us at <span className="font-bold text-slate-700 dark:text-slate-200">support@novawallet.app</span> — we reply within 24 hours on business days.
+          Questions about these terms? Email us at <span className="font-bold text-slate-700 dark:text-slate-200">support@novawallet.pp.ua</span> — we reply within 24 hours on business days.
         </div>
       </main>
     </div>
@@ -57,7 +57,7 @@ export function TermsPage() {
       </Section>
       <Section n={3} title="Keep your account safe">
         <p>Your password, transaction PIN, login PIN and fingerprint unlock are yours alone — never share them with anyone, including anyone claiming to be NovaWallet support. We will never ask for your PIN or password.</p>
-        <p>Tell us immediately at support@novawallet.app if you believe your account has been accessed without your permission. For your protection, the app locks automatically after inactivity and after repeated wrong password or PIN attempts.</p>
+        <p>Tell us immediately at support@novawallet.pp.ua if you believe your account has been accessed without your permission. For your protection, the app locks automatically after inactivity and after repeated wrong password or PIN attempts.</p>
       </Section>
       <Section n={4} title="Deposits, withdrawals and transfers">
         <p>Deposits may require a transaction ID and receipt and are credited after review. Withdrawals and cash-outs may be reviewed before they are completed. Transfers between NovaWallet users are instant and, once confirmed with your PIN, cannot be reversed by us — please check the recipient carefully before you send.</p>
@@ -112,7 +112,7 @@ export function PrivacyPage() {
         <p>Access to accounts is protected by your password plus the unlock methods you choose (login PIN or fingerprint, stored only on your device). The app locks automatically after inactivity, repeated wrong attempts trigger a temporary lock, and sensitive actions require your transaction PIN. No system is perfectly secure, but we design every layer to make your account hard to reach without you.</p>
       </Section>
       <Section n={7} title="Your rights and choices">
-        <p>You can view and update your profile information in the app at any time, and change your password and PINs whenever you like. You may ask us for a copy of your information, ask us to correct it, or ask us to delete your account and its data by emailing support@novawallet.app. We respond to verified requests within 30 days. In demo mode you can also erase everything instantly by clearing the app's site data in your browser.</p>
+        <p>You can view and update your profile information in the app at any time, and change your password and PINs whenever you like. You may ask us for a copy of your information, ask us to correct it, or ask us to delete your account and its data by emailing support@novawallet.pp.ua. We respond to verified requests within 30 days. In demo mode you can also erase everything instantly by clearing the app's site data in your browser.</p>
       </Section>
       <Section n={8} title="Children">
         <p>NovaWallet is for adults. You must be at least 18 years old (or the age of majority in your country) to hold an account. We do not knowingly collect information from children.</p>

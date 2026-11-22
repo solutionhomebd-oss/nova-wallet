@@ -15,7 +15,7 @@ import { CURRENCIES, PINNED, currencyName } from '../lib/currencies'
 const SUPPORT_CHANNELS = [
   { label: 'WhatsApp', href: 'https://wa.me/8801712345678', icon: MessageCircle, cls: 'bg-emerald-500' },
   { label: 'Telegram', href: 'https://t.me/novawallet', icon: Send, cls: 'bg-sky-500' },
-  { label: 'Email', href: 'mailto:support@novawallet.app', icon: Mail, cls: 'bg-violet-600' },
+  { label: 'Email', href: 'mailto:support@novawallet.pp.ua', icon: Mail, cls: 'bg-violet-600' },
 ]
 export default function Profile() {
   const { user, db, walletOf, updateProfile, changePassword, changePin, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
@@ -229,7 +229,7 @@ export default function Profile() {
           <div className="flex-1 min-w-0">
             <p className="font-extrabold">{t('p_support')}</p>
             <p className="text-xs text-slate-500 mt-0.5">{t('help_card_desc')}</p>
-            <p className="text-xs font-bold text-violet-600 mt-1">support@novawallet.app</p>
+            <p className="text-xs font-bold text-violet-600 mt-1">support@novawallet.pp.ua</p>
           </div>
         </div>
         <Btn className="w-full mt-4 py-3.5" onClick={() => setModal('support')}>{t('help_create_ticket')}</Btn>

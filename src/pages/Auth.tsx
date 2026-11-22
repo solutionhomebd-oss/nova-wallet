@@ -175,7 +175,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
         </div>
 
         <p className="mt-10 text-xs text-slate-400 flex items-center justify-center gap-1.5"><Repeat size={12} /> {t('market_note')}</p>
-        <p className="mt-3 text-xs text-slate-400">{t('footer_note')} · support@novawallet.app</p>
+        <p className="mt-3 text-xs text-slate-400">{t('footer_note')} · support@novawallet.pp.ua</p>
         <p className="mt-2 text-xs font-semibold"><Link to="/terms" className="text-violet-600 dark:text-violet-400 hover:underline">{t('join_terms_word')}</Link><span className="text-slate-300 dark:text-slate-600 mx-2">·</span><Link to="/privacy" className="text-violet-600 dark:text-violet-400 hover:underline">{t('join_privacy_word')}</Link></p>
       </section>
     </div>

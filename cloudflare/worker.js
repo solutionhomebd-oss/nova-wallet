@@ -197,7 +197,7 @@ async function deliverPush(jwk, vapidPublic, sub, payload) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d, alg: "ES256", ext: true }, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const header = b64uEnc(enc.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
-  const claims = b64uEnc(enc.encode(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:support@novawallet.app" })));
+  const claims = b64uEnc(enc.encode(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:support@novawallet.pp.ua" })));
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc.encode(header + "." + claims)));
   const jwt = header + "." + claims + "." + b64uEnc(sig);
   const receiverPub = b64uDec(sub.p256dh);

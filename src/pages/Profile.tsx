@@ -4,7 +4,7 @@ import { Bell, Camera, Car, ChevronRight, Coins, CreditCard, Download, FileText,
 import { useApp } from '../lib/store'
 import { apiPost } from '../lib/api'
 import { useMarket } from '../lib/market'
-import { Avatar, Badge, Btn, Card, Input, Modal, ModalActions, ModalDesc, ModalRow, MsgTicks, PinBoxes, Select, useConfirm } from '../components/ui'
+import { Avatar, Badge, Btn, Card, Input, Modal, ModalActions, ModalDesc, ModalRow, PinBoxes, Select, useConfirm } from '../components/ui'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
 import { fileToScaledDataUrl, fmtUSDT, fmtDateTime } from '../lib/utils'
 import { LANGUAGES } from '../lib/i18n'
@@ -18,7 +18,7 @@ const SUPPORT_CHANNELS = [
   { label: 'Email', href: 'mailto:support@novawallet.pp.ua', icon: Mail, cls: 'bg-violet-600' },
 ]
 export default function Profile() {
-  const { user, db, walletOf, updateProfile, changePassword, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, addTicket, replyTicket, markTicketRead, revokeSession, toast, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
+  const { user, db, walletOf, updateProfile, changePassword, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, signOut, submitKyc, revokeSession, toast, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, requestUpgrade, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, t, lang, setLanguage, currency, currencyIsAuto, detectedCurrency, setCurrency, fmtMoney } = useApp()
   const wEarlyP = db.wallets.find(x => x.userId === user?.id)
   const { coins } = useMarket(wEarlyP && Object.entries(wEarlyP.holdings).some(([s, a]) => s !== 'USDT' && a > 0) ? 10_000 : 60_000)
   const navigate = useNavigate()
@@ -28,7 +28,7 @@ export default function Profile() {
 
   useEffect(() => {
     if ((location.state as any)?.openLevels) { setModal('levels'); navigate(location.pathname, { replace: true, state: null }) }
-    else if ((location.state as any)?.openSupport) { setModal('support'); navigate(location.pathname, { replace: true, state: null }) }
+    else if ((location.state as any)?.openSupport) { navigate('/support', { replace: true }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [canInstall, setCanInstall] = useState(!!(window as any).__nwInstallPrompt)
@@ -136,14 +136,7 @@ export default function Profile() {
     }
     setPmForm({ show: true, id: m.id, type: m.type, label: m.label, detail: m.detail, network: CRYPTO_NETWORK_LABELS[3] })
   }
-  const [ticket, setTicket] = useState({ subject: '', message: '' })
-  const [chatText, setChatText] = useState('')
-  const [sending, setSending] = useState(false)
-  const sendStartRef = useRef(0)
-  const [starting, setStarting] = useState(false)
   const [pinEdit, setPinEdit] = useState(false); const [pinVal, setPinVal] = useState(''); const [pinValConfirm, setPinValConfirm] = useState('')
-  const [viewTicket, setViewTicket] = useState<string | null>(null)
-  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const [notifPrefs, setNotifPrefs] = useState({ tx: true, market: true, promo: false })
   const [pushOn, setPushOn] = useState(false); const [pushBusy, setPushBusy] = useState(false)
   useEffect(() => { try { navigator.serviceWorker?.ready.then(reg => reg.pushManager.getSubscription()).then(sub => setPushOn(!!sub)).catch(() => {}) } catch { /* push unsupported */ } }, [])
@@ -194,22 +187,6 @@ export default function Profile() {
     const ctx = canvas.getContext('2d')!; ctx.translate(canvas.width, 0); ctx.scale(-1, 1); ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
     setKycFacePhoto(canvas.toDataURL('image/jpeg', 0.75)); stopCam()
   }
-  useEffect(() => {
-    if (modal === 'support' && chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
-  })
-  const openTicketId = modal === 'support' && user ? (viewTicket ?? db.tickets.find(x => x.userId === user.id && x.status !== 'resolved')?.id ?? null) : null
-  // Stop the send spinner the moment the message is confirmed in the
-  // store (it used to spin until the heavy reply response landed, long
-  // after the bubble already showed as sent). The 800ms floor keeps the
-  // loading visible; the promise finally in the handlers is a backstop.
-  useEffect(() => {
-    if (!sending || !openTicketId) return
-    const tkNow = db.tickets.find(x => x.id === openTicketId)
-    if (!tkNow || tkNow.messages.some(m => m.from === 'user' && m.pending)) return
-    const id = window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - sendStartRef.current)))
-    return () => window.clearTimeout(id)
-  }, [sending, openTicketId, db.tickets])
-  useEffect(() => { if (openTicketId) void markTicketRead(openTicketId, false) }, [openTicketId])
   useEffect(() => {
     if (modal === 'kyc') { setKycStep(1); setKycDocType(user?.kycDocType ?? 'nid'); setKycDocNumber(user?.kycDocNumber ?? ''); setKycDocPhoto(user?.kycDocPhoto ?? ''); setKycFacePhoto(user?.kycFacePhoto ?? ''); setCamErr(false) }
     if (modal !== 'kyc') stopCam()
@@ -345,7 +322,7 @@ export default function Profile() {
             <p className="text-xs font-bold text-violet-600 mt-1">support@novawallet.pp.ua</p>
           </div>
         </div>
-        <Btn className="w-full mt-4 py-3.5" onClick={() => setModal('support')}>{t('help_create_ticket')}</Btn>
+        <Btn className="w-full mt-4 py-3.5" onClick={() => navigate('/support')}>{t('help_create_ticket')}</Btn>
         <div className="grid grid-cols-3 gap-2 mt-3">
           {SUPPORT_CHANNELS.map(c => (
             <a key={c.label} href={c.href} target="_blank" rel="noreferrer" className="flex flex-col items-center gap-1.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 py-3 font-bold text-xs text-slate-600 dark:text-slate-300">
@@ -704,64 +681,6 @@ export default function Profile() {
           ) })}
         </div>
         <ModalActions><Btn variant="ghost" className="w-full py-3.5" onClick={() => setModal(null)}>{t('done')}</Btn></ModalActions>
-      </Modal>
-      <Modal open={modal === 'support'} onClose={() => { setModal(null); setViewTicket(null) }} title={t('p_support')}>
-        <ModalDesc>Chat with our support team — we usually reply within 24 hours.</ModalDesc>
-        {(() => {
-          const mine = db.tickets.filter(x => x.userId === user.id)
-          const active = mine.find(x => x.status !== 'resolved')
-          const viewing = viewTicket ? mine.find(x => x.id === viewTicket) : undefined
-          const tk = viewing ?? active
-          const statusBadge = (st: string) => st === 'pending' ? <Badge tone="amber">Pending</Badge> : st === 'processing' ? <Badge tone="violet">Processing</Badge> : <Badge tone="green">Resolved</Badge>
-          if (tk) return (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                {viewing && <button onClick={() => setViewTicket(null)} className="text-xs font-bold text-violet-600 shrink-0">← Back</button>}
-                <p className="font-extrabold text-sm flex-1 truncate">{tk.subject}</p>
-                {statusBadge(tk.status)}
-              </div>
-              <div ref={chatScrollRef} className="h-64 overflow-y-auto rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-2.5 mb-3">
-                {tk.messages.map(m => (
-                  <div key={m.id} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm ${m.from === 'user' ? 'bg-violet-600 text-white rounded-br-md' : 'bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700/60 rounded-bl-md'}`}>
-                      {m.from === 'admin' && <p className="text-[10px] font-extrabold text-violet-500 mb-0.5">{t('chat_team')}</p>}
-                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                      <p className={`text-[10px] mt-1 ${m.from === 'user' ? 'text-violet-200' : 'text-slate-400'}`}>{fmtDateTime(m.at)}{m.from === 'user' && (m.pending ? <span className="ml-1.5 font-bold">Sending…</span> : <MsgTicks at={m.at} readAt={tk.adminReadAt} fetchedAt={tk.adminFetchedAt} label />)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {tk.status === 'resolved' ? (
-                <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3">{t('chat_closed_note')}</p>
-              ) : (
-                <div className="flex gap-2">
-                  <input value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && chatText.trim() && !sending) { const t0 = Date.now(); sendStartRef.current = t0; setSending(true); void replyTicket(tk.id, chatText, 'user').finally(() => window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - t0)))); setChatText('') } }} placeholder={t('chat_placeholder')} className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
-                  <Btn className="!px-4 shrink-0" disabled={sending} onClick={() => { if (chatText.trim() && !sending) { const t0 = Date.now(); sendStartRef.current = t0; setSending(true); void replyTicket(tk.id, chatText, 'user').finally(() => window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - t0)))); setChatText('') } }}>{sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</Btn>
-                </div>
-              )}
-            </div>
-          )
-          return (
-            <div>
-              <p className="font-extrabold text-sm mb-3">{t('chat_new')}</p>
-              <div className="space-y-4">
-                <Input label="Subject" value={ticket.subject} onChange={e => setTicket(x => ({ ...x, subject: e.target.value }))} />
-                <Input label="Message" value={ticket.message} onChange={e => setTicket(x => ({ ...x, message: e.target.value }))} />
-                <Btn className="w-full py-3.5" disabled={starting} onClick={async () => { if (starting) return; if (!ticket.subject.trim() || !ticket.message.trim()) return toast({ kind: 'error', title: 'Write a subject and your message' }); setStarting(true); const t0 = Date.now(); const err = await addTicket(ticket.subject.trim(), ticket.message.trim()); window.setTimeout(() => setStarting(false), Math.max(0, 800 - (Date.now() - t0))); if (err) return toast({ kind: 'error', title: err }); setTicket({ subject: '', message: '' }); toast({ kind: 'success', title: 'Support chat started', body: 'Status: Pending — we usually reply within 24 hours.' }) }}>{starting ? <Loader2 size={16} className="animate-spin" /> : t('chat_start')}</Btn>
-              </div>
-              {mine.length > 0 && <>
-                <p className="font-extrabold text-sm mt-6 mb-2.5">{t('chat_history')}</p>
-                <div className="space-y-2">
-                  {mine.map(x => (
-                    <button key={x.id} onClick={() => setViewTicket(x.id)} className="w-full text-left">
-                      <ModalRow><span className="flex items-center gap-2"><span className="flex-1 min-w-0"><span className="block font-bold text-sm truncate">{x.subject}</span><span className="text-xs text-slate-400">{fmtDateTime(x.updatedAt)}</span></span>{x.messages[x.messages.length - 1]?.from === 'admin' && (x.userReadAt ?? '') < x.updatedAt && <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />}{statusBadge(x.status)}</span></ModalRow>
-                    </button>
-                  ))}
-                </div>
-              </>}
-            </div>
-          )
-        })()}
       </Modal>
       <Modal open={modal === 'login'} onClose={() => { setModal(null); setPinEdit(false); setPinVal(''); setPinValConfirm('') }} title={t('p_login_options')}>
         {(() => {

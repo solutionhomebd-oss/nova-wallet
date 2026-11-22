@@ -27,6 +27,9 @@ const SendMoney = lazyNamed(() => import('./pages/Services'), 'SendMoney')
 const LoanPage = lazyNamed(() => import('./pages/ReferralLoan'), 'LoanPage')
 const Referral = lazyNamed(() => import('./pages/ReferralLoan'), 'Referral')
 const DirectWithdraw = lazyNamed(() => import('./pages/Extras'), 'DirectWithdraw')
+const SupportListPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportListPage')
+const SupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportChatPage')
+const AdminSupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'AdminSupportChatPage')
 const EarnPage = lazyNamed(() => import('./pages/Extras'), 'EarnPage')
 const SwapPage = lazyNamed(() => import('./pages/Extras'), 'SwapPage')
 const TradePage = lazyNamed(() => import('./pages/Extras'), 'TradePage')
@@ -178,6 +181,9 @@ export default function App() {
             <Route path="/cashout" element={<CashOut />} />
             <Route path="/send" element={<SendMoney />} />
             <Route path="/receive" element={<ReceiveMoney />} />
+            <Route path="/support" element={<SupportListPage />} />
+            <Route path="/support/:ticketId" element={<SupportChatPage />} />
+            <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
             <Route path="/withdraw" element={<DirectWithdraw />} />
             <Route path="/earn" element={<EarnPage />} />
             <Route path="/earn/checkin" element={<CheckinPage />} />

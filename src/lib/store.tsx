@@ -178,6 +178,7 @@ interface Ctx {
   setUserLoanLimit: (userId: string, bdt: number | null) => void
   addTicket: (subject: string, message: string) => Promise<string | null>
   replyTicket: (ticketId: string, text: string, as: 'user' | 'admin') => Promise<void>
+  startChatVerify: (ticketId: string) => Promise<string | null>
   deleteTicket: (ticketId: string) => void
   resolveTicket: (ticketId: string) => void
   /** Send a notification to EVERY user (server broadcast). Returns an error string or null. */
@@ -1635,6 +1636,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } finally { inflightSendsRef.current.delete(sendKey) }
     })()
   }
+  const startChatVerify: Ctx['startChatVerify'] = async (ticketId) => {
+    try { const r = await apiPost('/v1/admin/tickets/verify-start', { ticketId }); applyMoneyResult(r); return null }
+    catch (e: any) { return e.message }
+  }
   const deleteTicket: Ctx['deleteTicket'] = (ticketId) => {
     mutate(d => { d.tickets = d.tickets.filter(x => x.id !== ticketId) })
     void (async () => {
@@ -1747,7 +1752,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing withdrawal…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
     applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
-    publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, checkUsername, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
+    publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, checkUsername, addTicket, replyTicket, startChatVerify, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit,
     locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }

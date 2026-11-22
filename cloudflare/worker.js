@@ -1208,7 +1208,7 @@ async function loadTickets(db, uid, stampSide) {
   for (const t of rows.results) {
     const msgs = await db.prepare("SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC").bind(t.id).all();
     out.push({
-      id: t.id, userId: t.user_id, subject: t.subject, status: t.status,
+      id: t.id, userId: t.user_id, subject: t.subject, status: t.status, verifyStatus: t.verify_status || null,
       createdAt: isoOf(t.created_at), updatedAt: isoOf(t.updated_at || t.created_at),
       userReadAt: t.user_read_at ? isoOf(t.user_read_at) : null, adminReadAt: t.admin_read_at ? isoOf(t.admin_read_at) : null,
       userFetchedAt: t.user_fetched_at ? isoOf(t.user_fetched_at) : null, adminFetchedAt: t.admin_fetched_at ? isoOf(t.admin_fetched_at) : null,
@@ -1423,14 +1423,55 @@ async function handleTicketReply(request, env, auth, body) {
   if (!isDup) {
     await db.prepare("UPDATE support_tickets SET updated_at = CURRENT_TIMESTAMP, status = ?, " + (asAdmin ? "admin_read_at" : "user_read_at") + " = CURRENT_TIMESTAMP, " + (asAdmin ? "admin_fetched_at" : "user_fetched_at") + " = CURRENT_TIMESTAMP WHERE id = ?")
       .bind(asAdmin && tk.status === "pending" ? "processing" : tk.status, ticketId).run();
-    if (asAdmin && tk.user_id !== auth.uid) await notifyServer(db, tk.user_id, "support", "Support replied", "The support team replied to your chat: " + tk.subject, null);
+    if (asAdmin && tk.user_id !== auth.uid) await notifyServer(db, tk.user_id, "support", "Support replied", "The support team replied to your chat: " + tk.subject, "/support");
     if (!asAdmin) await notifyAdminsServer(db, "support", "Support chat reply", "New reply in: " + tk.subject, "/admin?tab=support");
+  }
+  // Identity verification: while a verification is pending on this
+  // ticket, a 6-digit message from the user is treated as their code
+  // attempt. Correct → verified + a centred system message; expired or
+  // 5 wrong attempts → cancelled with a system message.
+  if (!isDup && !asAdmin && tk.verify_status === "pending") {
+    if (/^\d{6}$/.test(text)) {
+      const sysMsg = async (msgText) => { await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)").bind(pubId("MSG"), ticketId, msgText).run(); };
+      if (Date.now() > Number(tk.verify_expires || 0)) {
+        await db.prepare("UPDATE support_tickets SET verify_status = NULL, verify_code_hash = NULL, verify_expires = NULL, verify_attempts = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+        await sysMsg("⌛ That verification code expired — ask support to send a new one.");
+      } else if ((await sha256Hex(ticketId + ":" + text)) === tk.verify_code_hash) {
+        await db.prepare("UPDATE support_tickets SET verify_status = 'verified', verify_code_hash = NULL, verify_expires = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+        await sysMsg("✅ Verified successfully");
+      } else {
+        const attempts = Number(tk.verify_attempts || 0) + 1;
+        if (attempts >= 5) {
+          await db.prepare("UPDATE support_tickets SET verify_status = NULL, verify_code_hash = NULL, verify_expires = NULL, verify_attempts = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
+          await sysMsg("❌ Verification cancelled — too many incorrect codes. Ask support to start again.");
+        } else {
+          await db.prepare("UPDATE support_tickets SET verify_attempts = ? WHERE id = ?").bind(attempts, ticketId).run();
+        }
+      }
+    }
   }
   // Light payload: a chat reply returns just the ticket list, not the
   // whole state/overview — the heavy response made the send button spin
   // long after the message itself had already landed.
   if (asAdmin) return json(request, { ok: true, tickets: await loadTickets(db, null) });
   return json(request, { ok: true, tickets: await loadTickets(db, auth.uid) });
+}
+
+async function handleTicketVerifyStart(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["support"])) return json(request, { error: "scope_denied" }, 403);
+  const ticketId = String(body.ticketId || "");
+  const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
+  if (!tk) return json(request, { error: "Ticket not found." }, 404);
+  if (tk.status === "resolved") return json(request, { error: "This chat is resolved and closed." }, 400);
+  const code = String(100000 + Math.floor(Math.random() * 900000));
+  await db.prepare("UPDATE support_tickets SET verify_code_hash = ?, verify_expires = ?, verify_attempts = 0, verify_status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(await sha256Hex(ticketId + ":" + code), Date.now() + 10 * 60000, ticketId).run();
+  await db.prepare("INSERT INTO ticket_messages (id, ticket_id, sender, text) VALUES (?, ?, 'system', ?)")
+    .bind(pubId("MSG"), ticketId, "🔐 For verify it's you: a 6-digit code was sent to the account email address. Please send that code here in this chat.").run();
+  await sendUserEmail(env, db, tk.user_id, "security", "Support verification code — NovaWallet", "Verify it's you", ["Our support team asked to verify your identity during a support chat.", "Send this code in the chat — it expires in 10 minutes. Never share it anywhere else."], code);
+  await auditLog(db, auth, "ticket.verify_start", ticketId + " · user " + tk.user_id);
+  return json(request, { ok: true, tickets: await loadTickets(db, null) });
 }
 
 async function handleTicketDelete(request, env, auth, body) {
@@ -1454,7 +1495,7 @@ async function handleTicketResolve(request, env, auth, body) {
   const tk = await db.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first();
   if (!tk) return json(request, { error: "Ticket not found." }, 404);
   await db.prepare("UPDATE support_tickets SET status = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(ticketId).run();
-  await notifyServer(db, tk.user_id, "support", "Support chat resolved", "Your support chat \"" + tk.subject + "\" was marked resolved and closed.", null);
+  await notifyServer(db, tk.user_id, "support", "Support chat resolved", "Your support chat \"" + tk.subject + "\" was marked resolved and closed.", "/support");
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -1514,9 +1555,11 @@ async function handleAdminSetLevel(request, env, auth, body) {
   if (!(level >= 1 && level <= 4)) return json(request, { error: "Level must be between 1 and 4." }, 400);
   const u = await getUserRow(db, target);
   if (!u) return json(request, { error: "User not found." }, 404);
+  const prevLevel = Number(u.level);
   await db.prepare("UPDATE users SET level = ? WHERE id = ?").bind(level, target).run();
   await auditLog(db, auth, "level.set", target + " → Level " + level);
   await notifyServer(db, target, "security", "Account level changed", "An admin set your account to Level " + level + ".", null);
+  await sendUserEmail(env, db, target, "account", level > prevLevel ? "Your NovaWallet level was upgraded — you are now Level " + level + " 🎉" : "Your NovaWallet level was updated to Level " + level, level > prevLevel ? "Level upgraded" : "Level updated", ["Your account level was changed from Level " + prevLevel + " to Level " + level + " by our team.", level > prevLevel ? "Your new limits and benefits are active right away." : "If you have questions about this change, reply to this email or open a support chat."], "Level " + level);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -1550,6 +1593,7 @@ async function handleAdminLevelDecide(request, env, auth, body) {
   await auditLog(db, auth, ok ? "level.approve" : "level.reject", row.user_id + " → Level " + row.to_level);
   await notifyServer(db, row.user_id, "security", ok ? "🎉 Level upgraded" : "Upgrade request rejected",
     ok ? "Your account is now Level " + row.to_level + ". Higher limits are active." : "Your upgrade request was not approved. Check the level requirements and try again.", null);
+  await sendUserEmail(env, db, row.user_id, "account", ok ? "Your NovaWallet level was upgraded — you are now Level " + row.to_level + " 🎉" : "Your NovaWallet level upgrade request was not approved", ok ? "Level upgraded" : "Upgrade request update", [ok ? "Great news — your upgrade request was approved and your account is now Level " + row.to_level + ". Your higher limits and benefits are active right away." : "Your request to upgrade to Level " + row.to_level + " was not approved this time. Please check the level requirements in the app and try again when you meet them."], ok ? "Level " + row.to_level : undefined);
   return json(request, { ok: true, overview: await loadOverview(db) });
 }
 
@@ -2749,6 +2793,7 @@ export default {
           case "/v1/tickets/reply": return await handleTicketReply(request, env, auth, body);
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);
+          case "/v1/admin/tickets/verify-start": return await handleTicketVerifyStart(request, env, auth, body);
           case "/v1/levels/request": return await handleLevelRequest(request, env, auth, body);
           case "/v1/email-prefs": return await handleEmailPrefs(request, env, auth, body);
           case "/v1/email-change/start": return await handleEmailChangeStart(request, env, auth);

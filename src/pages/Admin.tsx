@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Trash2, Loader2, Mail } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Loader2, Mail } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
-import { Avatar, Badge, Btn, Card, Empty, Input, Modal, MsgTicks, Select, TxDirIcon, statusTone } from '../components/ui'
+import { Avatar, Badge, Btn, Card, Empty, Input, Modal, Select, TxDirIcon, statusTone } from '../components/ui'
 import { fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
@@ -1161,84 +1161,18 @@ export default function Admin() {
 const SUP_TONE = (st: string) => st === 'pending' ? 'amber' : st === 'processing' ? 'violet' : 'green'
 
 function SupportChat() {
-  const { db, replyTicket, deleteTicket, resolveTicket, markTicketRead, toast } = useApp()
+  const { db } = useApp()
+  const navigate = useNavigate()
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
-  const [sel, setSel] = useState<string | null>(null)
-  const [text, setText] = useState('')
-  const [delChatArm, setDelChatArm] = useState(false)
-  const [sending, setSending] = useState(false)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const scrollRefDesk = useRef<HTMLDivElement | null>(null)
-  // Desktop shows the open chat beside the list; phones keep the modal.
-  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches)
-  useEffect(() => { const mq = window.matchMedia('(min-width: 1024px)'); const fn = () => setIsDesktop(mq.matches); mq.addEventListener('change', fn); return () => mq.removeEventListener('change', fn) }, [])
   const userOf = (id: string) => db.users.find(u => u.id === id)
   const list = db.tickets.filter(tk => {
     const u = userOf(tk.userId)
     const hay = `${u?.name ?? ''} @${u?.username ?? ''} ${u?.email ?? ''} ${tk.subject}`.toLowerCase()
     return (filter === 'all' || tk.status === filter) && hay.includes(q.trim().toLowerCase())
   }).slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const tk = sel ? db.tickets.find(x => x.id === sel) : undefined
-  useEffect(() => { if (sel) void markTicketRead(sel, true); setDelChatArm(false) }, [sel])
-  useEffect(() => { for (const r of [scrollRef, scrollRefDesk]) if (r.current) r.current.scrollTop = r.current.scrollHeight })
-  const sendStartRef = useRef(0)
-  const send = () => { if (tk && text.trim() && !sending) { const t0 = Date.now(); sendStartRef.current = t0; setSending(true); void replyTicket(tk.id, text, 'admin').finally(() => window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - t0)))); setText('') } }
-  // Stop the spinner as soon as the message is confirmed in the store —
-  // the reply response can lag behind the bubble itself.
-  useEffect(() => {
-    if (!sending || !tk) return
-    if (tk.messages.some(m => m.from === 'admin' && m.pending)) return
-    const id = window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - sendStartRef.current)))
-    return () => window.clearTimeout(id)
-  }, [sending, tk])
-  // The armed delete (✓) disarms itself after a few seconds.
-  useEffect(() => {
-    if (!delChatArm) return
-    const id = window.setTimeout(() => setDelChatArm(false), 4000)
-    return () => window.clearTimeout(id)
-  }, [delChatArm])
-  const tku = tk ? userOf(tk.userId) : undefined
-  // One thread renderer, two homes: a tall side pane on desktop, the
-  // modal on phones. It reads the ticket live from the store, so new
-  // messages appear while the chat stays open.
-  const thread = (ref: React.RefObject<HTMLDivElement | null>, fill: boolean) => tk && (
-    <div className={fill ? 'flex flex-col h-full p-4' : ''}>
-      <div className="flex items-center gap-2.5 flex-wrap mb-4 shrink-0">
-        <Avatar name={tku?.name ?? '?'} photo={tku?.photo} />
-        <div className="flex-1 min-w-0"><p className="font-extrabold truncate">{tku?.name}</p><p className="text-xs text-slate-400 truncate">@{tku?.username} · {tku?.email}</p></div>
-        <Badge tone={SUP_TONE(tk.status)}>{tk.status}</Badge>
-        {tk.status !== 'resolved' && <button onClick={() => { resolveTicket(tk.id); toast({ kind: 'success', title: 'Chat resolved & closed' }) }} title="Mark resolved" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-white bg-emerald-500 hover:bg-emerald-400 active:scale-[.98] transition"><Check size={16} strokeWidth={3} /></button>}
-        {delChatArm ? (
-          <button onClick={() => { deleteTicket(tk.id); setSel(null); setDelChatArm(false); toast({ kind: 'success', title: 'Chat deleted', body: 'The whole conversation was removed.' }) }} title="Tap again to delete this chat" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-white bg-rose-600 hover:bg-rose-500 active:scale-[.98] transition"><Check size={16} strokeWidth={3} /></button>
-        ) : (
-          <button onClick={() => setDelChatArm(true)} title="Delete this chat" className="inline-flex items-center justify-center shrink-0 rounded-full px-3.5 py-2.5 text-rose-500 border border-rose-300/60 dark:border-rose-500/40 hover:bg-rose-50 dark:hover:bg-rose-500/10 active:scale-[.98] transition"><Trash2 size={15} /></button>
-        )}
-      </div>
-      <div ref={ref} className={`${fill ? 'flex-1 min-h-0' : 'h-[46vh]'} overflow-y-auto rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-2.5 mb-3`}>
-        {tk.messages.map(m => (
-          <div key={m.id} className={`flex ${m.from === 'admin' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-sm ${m.from === 'admin' ? 'bg-violet-600 text-white rounded-br-md' : 'bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700/60 rounded-bl-md'}`}>
-              {m.from === 'user' && <p className="text-[10px] font-extrabold text-violet-500 mb-0.5">{tku?.name}</p>}
-              <p className="whitespace-pre-wrap break-words">{m.text}</p>
-              <p className={`text-[10px] mt-1 ${m.from === 'admin' ? 'text-violet-200' : 'text-slate-400'}`}>{fmtDateTime(m.at)}{m.from === 'admin' && m.pending ? <span className="ml-1.5 font-bold">Sending…</span> : m.from === 'admin' ? <MsgTicks at={m.at} readAt={tk.userReadAt} fetchedAt={tk.userFetchedAt} label /> : <MsgTicks at={m.at} readAt={tk.adminReadAt} fetchedAt={tk.adminFetchedAt} tone="dark" label />}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      {tk.status === 'resolved' ? (
-        <p className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-xl px-3.5 py-3 shrink-0">This chat is resolved and closed. The customer must open a new chat for further help.</p>
-      ) : (
-        <div className="flex gap-2 shrink-0">
-          <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }} placeholder="Type your reply… (first reply: Pending → Processing)" className="flex-1 min-w-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-medium outline-none focus:border-violet-400" />
-          <Btn className="!px-5 shrink-0" disabled={sending} onClick={send}>{sending ? <Loader2 size={16} className="animate-spin" /> : 'Send'}</Btn>
-        </div>
-      )}
-    </div>
-  )
   return (
-    <div className="lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:gap-4 lg:items-start">
-      <div>
+    <div>
       <div className="flex flex-col gap-3 mb-4">
         <Input placeholder="Search by username or email…" value={q} onChange={e => setQ(e.target.value)} />
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
@@ -1247,18 +1181,19 @@ function SupportChat() {
           ))}
         </div>
       </div>
-      <div className="space-y-2 lg:max-h-[calc(100vh-270px)] lg:overflow-y-auto lg:pr-1">
+      <p className="text-xs text-slate-400 mb-3">Tap a chat to open it full-page.</p>
+      <div className="space-y-2">
         {list.length === 0 ? <Card><Empty title="No support chats" body="Nothing matches this search or filter." /></Card> : list.map(x => {
           const u = userOf(x.userId); const last = x.messages[x.messages.length - 1]
           return (
-            <button key={x.id} onClick={() => setSel(x.id)} className="w-full text-left">
+            <button key={x.id} onClick={() => navigate('/admin/support/' + x.id)} className="w-full text-left">
               <Card className="p-4">
                 <div className="flex items-center gap-3">
                   <Avatar name={u?.name ?? '?'} photo={u?.photo} />
                   <div className="flex-1 min-w-0">
                     <p className="font-bold truncate">{x.subject}</p>
                     <p className="text-xs text-slate-400 truncate">{u?.name} · @{u?.username} · {u?.email}</p>
-                    {last && <p className="text-xs text-slate-500 truncate mt-0.5">{last.from === 'admin' ? 'Support: ' : ''}{last.text}</p>}
+                    {last && <p className="text-xs text-slate-500 truncate mt-0.5">{last.from === 'admin' ? 'Support: ' : last.from === 'system' ? 'System: ' : ''}{last.text}</p>}
                     {last?.from === 'user' && (x.adminReadAt ?? '') < x.updatedAt && <span className="inline-block w-2 h-2 rounded-full bg-rose-500 ml-1.5 align-middle" />}
                   </div>
                   <div className="text-right shrink-0"><Badge tone={SUP_TONE(x.status)}>{x.status}</Badge><p className="text-[10px] text-slate-400 mt-1">{fmtDateTime(x.updatedAt)}</p></div>
@@ -1268,19 +1203,6 @@ function SupportChat() {
           )
         })}
       </div>
-      </div>
-      <div className="hidden lg:block">
-        {tk ? (
-          <Card className="p-0 overflow-hidden"><div className="h-[calc(100vh-220px)] min-h-[520px]">{thread(scrollRefDesk, true)}</div></Card>
-        ) : (
-          <Card className="p-0 overflow-hidden"><div className="h-[calc(100vh-220px)] min-h-[520px] flex items-center justify-center p-6"><Empty title="No chat selected" body="Pick a conversation from the list — it opens here and updates live while you keep it open." /></div></Card>
-        )}
-      </div>
-      {!isDesktop && (
-        <Modal open={!!tk} onClose={() => { setSel(null); setText('') }} title={tk?.subject ?? 'Support chat'}>
-          {thread(scrollRef, false)}
-        </Modal>
-      )}
     </div>
   )
 }

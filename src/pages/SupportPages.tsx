@@ -238,8 +238,13 @@ export function AdminSupportChatPage() {
   // panel opens instantly (the full admin overview is far too heavy).
   useEffect(() => {
     if (canned !== null) return
-    apiGet('/v1/admin/canned').then((r: any) => setCanned(r.cannedReplies ?? [])).catch(() => setCanned([]))
-  }, [canned])
+    let alive = true
+    const tryFetch = (n: number) => {
+      apiGet('/v1/admin/canned').then((r: any) => { if (alive) setCanned(r.cannedReplies ?? []) }).catch(() => { if (alive && n < 6) window.setTimeout(() => tryFetch(n + 1), 1500) })
+    }
+    tryFetch(0)
+    return () => { alive = false }
+  }, [canned, tplOpen])
   const saveCanned = async () => {
     if (!tplForm || tplBusy) return
     if (!tplForm.title.trim() || !tplForm.text.trim()) return toast({ kind: 'error', title: 'Write a title and the reply text' })

@@ -38,7 +38,7 @@ const SCOPE_TABS: Record<string, string[]> = {
 }
 
 export default function Admin() {
-  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked , markRead, markAllRead, broadcast, setAdminScope, setAdminRole, adminErrors } = useApp()
+  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked , markRead, markAllRead, broadcast, setAdminScope, setAdminRole, adminErrors } = useApp()
   const usdt = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const byDateDesc = <T extends { createdAt: string }>(arr: T[]): T[] => [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   const { coins } = useMarket(30_000)
@@ -98,7 +98,8 @@ export default function Admin() {
   const [mAdjDir, setMAdjDir] = useState<'add' | 'deduct'>('add'); const [mAdjTitle, setMAdjTitle] = useState('Charge'); const [mAdjNote, setMAdjNote] = useState('')
   const [mSym, setMSym] = useState('BTC'); const [mSide, setMSide] = useState<'buy' | 'sell'>('buy'); const [mTradeAmt, setMTradeAmt] = useState('')
   const [mClearArm, setMClearArm] = useState(false)
-  const openUser = (u: any) => { setSelUserId(u.id); setMAdjAmt(''); setMAdjTitle('Charge'); setMAdjNote(''); setMAdjDir('add'); setMTradeAmt(''); setMSide('buy'); setMSym('BTC'); setMClearArm(false); setMLoanLimit(u.loanLimitOverride ? String(Math.round(u.loanLimitOverride / db.settings.bdtPerUsd * 100) / 100) : '') }
+  const [mNewPin, setMNewPin] = useState(''); const [mPinArm, setMPinArm] = useState(false); const [mPinBusy, setMPinBusy] = useState(false)
+  const openUser = (u: any) => { setSelUserId(u.id); setMAdjAmt(''); setMAdjTitle('Charge'); setMAdjNote(''); setMAdjDir('add'); setMTradeAmt(''); setMSide('buy'); setMSym('BTC'); setMClearArm(false); setMNewPin(''); setMPinArm(false); setMLoanLimit(u.loanLimitOverride ? String(Math.round(u.loanLimitOverride / db.settings.bdtPerUsd * 100) / 100) : '') }
   const selUser = selUserId ? db.users.find(x => x.id === selUserId) ?? null : null
   const selTx = selTxId ? db.txs.find(t => t.id === selTxId) ?? null : null
   useEffect(() => { setTxCancelArm(false) }, [selTxId])
@@ -874,6 +875,7 @@ export default function Admin() {
           const isPairSend = (t: (typeof heldTxs)[number]) => t.category === 'send' && db.txs.some(x => x.category === 'receive' && x.status === 'held' && x.counterparty === selSuid && Math.abs(x.amount) === Math.abs(t.amount))
           const heldSum = heldTxs.filter(t => !isPairSend(t)).reduce((a, t) => a + Math.abs(t.amount), 0)
           const stmt = byDateDesc(db.txs.filter(t => t.userId === selUser.id)).slice(0, 10)
+          const pinLocked = !!selUser.pinLockedUntil && new Date(selUser.pinLockedUntil).getTime() > Date.now()
           const ADJ_TITLES = ['Charge', 'Complaint', 'Hold', 'Refund', 'Bonus', 'Compensation', 'Correction']
           const tradePrice = priceOfA(mSym)
           const sellHolding = sw?.holdings[mSym] ?? 0
@@ -1082,6 +1084,16 @@ export default function Admin() {
                   <Btn className="!py-3" onClick={() => { const a = Number(mLoanLimit); if (!a || a <= 0) return toast({ kind: 'error', title: 'Enter a loan limit' }); setUserLoanLimit(selUser.id, Math.round(a * db.settings.bdtPerUsd)); toast({ kind: 'success', title: 'Loan limit updated' }) }}>Save</Btn>
                 </div>
                 {selUser.loanLimitOverride ? <Btn variant="ghost" className="!py-1.5 !text-xs mt-1" onClick={() => { setUserLoanLimit(selUser.id, null); setMLoanLimit(''); toast({ kind: 'success', title: 'Loan limit reset to level default' }) }}>Reset to level default</Btn> : null}
+              </div>
+              {/* Transaction PIN recovery */}
+              <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
+                <p className="font-extrabold text-sm mb-2">Transaction PIN</p>
+                <p className="text-xs text-slate-400 mb-2">{pinLocked ? <>🔒 <b className="text-rose-500">Locked until {fmtDateTime(selUser.pinLockedUntil!)}</b> — too many wrong attempts.</> : (selUser.pinFailCount ?? 0) > 0 ? <>Active · {selUser.pinFailCount} failed attempt{(selUser.pinFailCount ?? 0) === 1 ? '' : 's'} on record.</> : 'Active · no failed attempts.'}</p>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1"><Input label="New PIN (4 digits)" inputMode="numeric" maxLength={4} placeholder="••••" value={mNewPin} onChange={e => { setMNewPin(e.target.value.replace(/\D/g, '')); setMPinArm(false) }} /></div>
+                  <Btn className="!py-3" variant={mPinArm ? 'danger' : 'primary'} disabled={mNewPin.length !== 4 || mPinBusy} onClick={async () => { if (!mPinArm) { setMPinArm(true); setTimeout(() => setMPinArm(false), 4000); return } setMPinBusy(true); try { const e = await adminResetPin(selUser.id, mNewPin); if (e) { toast({ kind: 'error', title: e }); return } setMNewPin(''); setMPinArm(false); toast({ kind: 'success', title: 'PIN reset for ' + selUser.name, body: 'The user was notified in-app and by email. Tell them the new PIN after verifying their identity.' }) } finally { setMPinBusy(false) } }}>{mPinBusy ? <Loader2 size={16} className="animate-spin" /> : mPinArm ? '⚠️ Confirm reset' : 'Reset PIN'}</Btn>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">PIN recovery for users who forgot theirs — the PIN can never be changed inside the app. Setting a new PIN also clears the failed-attempt count and any lock. Audited + notified.</p>
               </div>
               {/* Statement */}
               <div>

@@ -459,7 +459,7 @@ async function loadState(db, uid, lite = false) {
 
 async function loadDirectory(db, includePhone = false) {
   const rows = await db.prepare(
-    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.admin_scope, u.created_at, p.full_name,
+    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.admin_scope, u.created_at, u.pin_fail_count, u.pin_locked_until, p.full_name,
        (SELECT status FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_status,
        (SELECT doc_type FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_type,
        (SELECT doc_number FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_number,
@@ -471,6 +471,7 @@ async function loadDirectory(db, includePhone = false) {
     ...(includePhone ? { phone: u.phone || "" } : {}),
     role: u.role, status: u.status, level: Number(u.level), referralCode: u.referral_code,
     ...(u.admin_scope ? { adminScope: u.admin_scope } : {}),
+    pinFailCount: Number(u.pin_fail_count || 0), ...(u.pin_locked_until ? { pinLockedUntil: u.pin_locked_until } : {}),
     createdAt: isoOf(u.created_at),
     kyc: u.kyc_status || "unverified",
     ...(u.kyc_status ? { kycDocType: u.kyc_doc_type, kycDocNumber: u.kyc_doc_number, kycSubmittedAt: isoOf(u.kyc_created_at) } : {}),
@@ -2394,6 +2395,29 @@ async function handleEmailChangeConfirm(request, env, auth, body) {
   await sendUserEmail(env, db, auth.uid, "account", "This email is now linked to your NovaWallet account", "Email address updated", ["This email address (" + row.new_email + ") is now the email on your NovaWallet account."]);
   return json(request, { ok: true, email: row.new_email });
 }
+// Admin PIN recovery: a user who forgot their transaction PIN has no
+// self-service route (PINs can never be changed in the app), so an admin
+// sets a new one here. Rewrites both PIN hashes, clears the failed-attempt
+// counter and any lock, audits the action, and notifies the user in-app
+// and by email (the PIN itself is never sent — the admin tells the user
+// after verifying their identity).
+async function handleAdminResetPin(request, env, auth, body) {
+  const db = env.DB;
+  if (!scopeAllowed(auth, ["finance"])) return json(request, { error: "Your admin scope cannot reset PINs." }, 403);
+  const target = String(body.userId || "");
+  const pin = String(body.pin || "");
+  if (!/^\d{4}$/.test(pin)) return json(request, { error: "PIN must be exactly 4 digits." }, 400);
+  const user = await getUserRow(db, target);
+  if (!user) return json(request, { error: "User not found." }, 404);
+  const fnv = hashSecret(pin);
+  await db.prepare("UPDATE users SET pin_hash = ?, pin_hash_v2 = ?, pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?")
+    .bind(fnv, await pbkdf2Hash(fnv), target).run();
+  await auditLog(db, auth, "user.pin_reset", (user.username || target) + " — transaction PIN reset by admin");
+  await notifyServer(db, target, "security", "Transaction PIN reset", "An admin has reset your transaction PIN. Use the new PIN you received from our support team for your next transaction. If you did not request this, contact support immediately.", null);
+  await sendUserEmail(env, db, target, "security", "Your NovaWallet transaction PIN was reset", "Transaction PIN reset", ["Your transaction PIN was reset by the NovaWallet team — for example, because you asked support for help after forgetting it.", "Use the new PIN you received from our support team for your next transaction.", "If you did not request this, contact support immediately at support@novawallet.pp.ua."]);
+  return json(request, { ok: true, overview: await loadOverview(db) });
+}
+
 async function handleAdminTestEmail(request, env, auth) {
   const db = env.DB;
   const me = await getUserRow(db, auth.uid);
@@ -2696,6 +2720,7 @@ export default {
           if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403);
           switch (path) {
             case "/v1/admin/test-email": return await handleAdminTestEmail(request, env, auth);
+            case "/v1/admin/reset-pin": return await handleAdminResetPin(request, env, auth, body);
             case "/v1/admin/decide-deposit": return await handleDecideDeposit(request, env, auth, body);
             case "/v1/admin/decide-withdraw": return await handleDecideWithdraw(request, env, auth, body);
             case "/v1/admin/decide-loan": return await handleDecideLoan(request, env, auth, body);

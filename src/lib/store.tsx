@@ -172,6 +172,7 @@ interface Ctx {
   decideUpgrade: (id: string, ok: boolean) => void
   updateLevelDef: (level: number, patch: Partial<DB['levels'][number]>) => void
   setUserLevel: (userId: string, level: number) => void
+  adminResetPin: (userId: string, pin: string) => Promise<string | null>
   setUserLoanLimit: (userId: string, bdt: number | null) => void
   addTicket: (subject: string, message: string) => Promise<string | null>
   replyTicket: (ticketId: string, text: string, as: 'user' | 'admin') => Promise<void>
@@ -389,6 +390,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     phone: su.phone ?? '', passwordHash: '', pinHash: '', role: su.role, status: su.status, kyc: su.kyc ?? 'unverified',
     ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt } : {}),
     ...(su.adminScope ? { adminScope: su.adminScope } : {}),
+    ...(su.pinFailCount !== undefined ? { pinFailCount: su.pinFailCount } : {}), ...(su.pinLockedUntil ? { pinLockedUntil: su.pinLockedUntil } : {}),
     referralCode: su.referralCode || '', referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
     createdAt: su.createdAt || nowISO(), lastLogin: su.createdAt || nowISO(), sessions: [],
   })
@@ -417,6 +419,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         existing.role = su.role ?? existing.role
         if (su.adminScope) existing.adminScope = su.adminScope; else if (existing.role !== 'admin') delete existing.adminScope
         if (su.kycDocType) { existing.kycDocType = su.kycDocType; existing.kycDocNumber = su.kycDocNumber; existing.kycSubmittedAt = su.kycSubmittedAt }
+        if (su.pinFailCount !== undefined) existing.pinFailCount = su.pinFailCount
+        if (su.pinLockedUntil) existing.pinLockedUntil = su.pinLockedUntil; else delete existing.pinLockedUntil
         continue
       }
       d.users.push(stubFrom(su))
@@ -1700,6 +1704,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       catch (e: any) { toast({ kind: 'error', title: 'Level change failed', body: e.message }) }
     })()
   }
+  const adminResetPin: Ctx['adminResetPin'] = async (userId2, pin) => {
+    const suid = serverUidOf(userId2)
+    if (!suid) return 'This account has not synced with the server yet — wait a few seconds and try again.'
+    try {
+      const r = await apiPost('/v1/admin/reset-pin', { userId: suid, pin })
+      applyMoneyResult(r)
+      return null
+    } catch (e: any) { return e.message || 'PIN reset failed.' }
+  }
   const setUserLoanLimit: Ctx['setUserLoanLimit'] = (userId2, bdt) => mutate(d => {
     const u = d.users.find(x => x.id === userId2); if (!u) return
     if (bdt === null) delete u.loanLimitOverride; else u.loanLimitOverride = bdt
@@ -1714,7 +1727,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
     updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, addTicket, replyTicket, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
-    requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, setUserLoanLimit,
+    requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit,
     locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,
   }
   return (

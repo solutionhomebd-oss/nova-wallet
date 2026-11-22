@@ -95,8 +95,8 @@ interface Ctx {
   addUserPayMethod: (type: 'bank' | 'crypto', label: string, detail: string) => void
   updateUserPayMethod: (id: string, type: 'bank' | 'crypto', label: string, detail: string) => void
   removeUserPayMethod: (id: string) => void
-  requestPasswordOtp: (email: string) => { error: string | null; otp: string | null }
-  requestEmailOtp: (email: string) => Promise<{ error: string | null; emailed: boolean }>
+  requestPasswordOtp: (email: string) => { error: string | null; otp: string | null; waitSeconds: number }
+  requestEmailOtp: (email: string) => Promise<{ error: string | null; emailed: boolean; waitSeconds: number }>
   verifyEmailOtp: (email: string, code: string) => Promise<{ error: string | null; grant: string | null }>
   resetPasswordByGrant: (email: string, grant: string, newPassword: string) => Promise<string | null>
   verifyPasswordOtp: (email: string, otp: string) => string | null
@@ -854,17 +854,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.passwordHash = hashSecret(newPassword); notify(d, u.id, 'Password reset', 'Your password was reset using your transaction PIN. If this was not you, contact support immediately.', 'security') })
     return null
   }
-  // Email-OTP password reset. DEMO delivery: the OTP is returned so the UI can
-  // show it on screen — when SMTP is connected, requestPasswordOtp should send
-  // it by email instead and stop returning it. The OTP itself is stored hashed
-  // with a 10-minute expiry, and wrong guesses share the 5-fail / 5-min lockout.
+  // Local (demo) email-OTP fallback, used only while the server reports
+  // emailed:false. Mirrors the server rules: 2-minute validity and no
+  // resend while a code is still valid (waitSeconds tells the UI how long).
   const requestPasswordOtp: Ctx['requestPasswordOtp'] = (email) => {
     const u = dbRef.current.users.find(x => x.email === email.trim().toLowerCase())
-    if (!u) return { error: 'No account found for that email.', otp: null }
-    const lk = lockError(u.id); if (lk) return { error: lk, otp: null }
+    if (!u) return { error: 'No account found for that email.', otp: null, waitSeconds: 0 }
+    const lk = lockError(u.id); if (lk) return { error: lk, otp: null, waitSeconds: 0 }
+    if (u.resetOtpHash && u.resetOtpExpires && Date.now() < u.resetOtpExpires) return { error: null, otp: null, waitSeconds: Math.ceil((u.resetOtpExpires - Date.now()) / 1000) }
     const otp = String(Math.floor(100000 + Math.random() * 900000))
-    mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.resetOtpHash = hashSecret(otp); du.resetOtpExpires = Date.now() + 10 * 60 * 1000 })
-    return { error: null, otp }
+    mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.resetOtpHash = hashSecret(otp); du.resetOtpExpires = Date.now() + 2 * 60 * 1000 })
+    return { error: null, otp, waitSeconds: 0 }
   }
   const verifyPasswordOtp: Ctx['verifyPasswordOtp'] = (email, otp) => {
     const u = dbRef.current.users.find(x => x.email === email.trim().toLowerCase())
@@ -890,10 +890,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const requestEmailOtp: Ctx['requestEmailOtp'] = async (email) => {
     try {
       const r = await publicPost('/v1/password/request-otp', { email: email.trim().toLowerCase() })
-      return { error: null, emailed: !!r.emailed }
+      return { error: null, emailed: !!r.emailed, waitSeconds: Number(r.waitSeconds || 0) }
     } catch (e: any) {
-      if (e instanceof TypeError) return { error: null, emailed: false } // API unreachable — demo fallback
-      return { error: e.message || 'Could not send the code.', emailed: false }
+      if (e instanceof TypeError) return { error: null, emailed: false, waitSeconds: 0 } // API unreachable — demo fallback
+      return { error: e.message || 'Could not send the code.', emailed: false, waitSeconds: 0 }
     }
   }
   const verifyEmailOtp: Ctx['verifyEmailOtp'] = async (email, code) => {

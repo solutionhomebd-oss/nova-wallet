@@ -2056,7 +2056,7 @@ function smtpReplies(socket) {
   };
   return { reply };
 }
-async function sendEmail(env, { to, subject, text }) {
+async function sendEmail(env, { to, subject, text, html }) {
   const user = env.SMTP_USER, pass = env.SMTP_PASS;
   if (!user || !pass) return { sent: false, reason: "not_configured" };
   let socket;
@@ -2076,18 +2076,26 @@ async function sendEmail(env, { to, subject, text }) {
     await send("MAIL FROM:<" + user + ">"); await expect([250]);
     await send("RCPT TO:<" + to + ">"); await expect([250, 251]);
     await send("DATA"); await expect([354]);
-    const body64 = b64Utf8(text).replace(/(.{76})/g, "$1\r\n");
+    let contentHeaders, payload;
+    if (html) {
+      const boundary = "----=_NovaPart_" + crypto.randomUUID().replace(/-/g, "");
+      const part = (ct, content) => "--" + boundary + "\r\nContent-Type: " + ct + "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" + b64Utf8(content).replace(/(.{76})/g, "$1\r\n");
+      contentHeaders = ["MIME-Version: 1.0", "Content-Type: multipart/alternative; boundary=\"" + boundary + "\""];
+      payload = part("text/plain", text) + "\r\n" + part("text/html", html) + "\r\n--" + boundary + "--";
+    } else {
+      contentHeaders = ["MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64"];
+      payload = b64Utf8(text).replace(/(.{76})/g, "$1\r\n");
+    }
     const msg = [
       "From: \"NovaWallet\" <" + user + ">",
       "To: " + to,
+      "Reply-To: support@novawallet.pp.ua",
       "Subject: " + subject,
       "Date: " + new Date().toUTCString(),
       "Message-ID: <" + crypto.randomUUID() + "@novawallet.pp.ua>",
-      "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=UTF-8",
-      "Content-Transfer-Encoding: base64",
+      ...contentHeaders,
       "",
-      body64,
+      payload,
     ].join("\r\n");
     await writer.write(enc.encode(msg + "\r\n.\r\n")); await expect([250]);
     try { await send("QUIT"); } catch { /* closing anyway */ }
@@ -2128,6 +2136,32 @@ const OTP_ERR = {
   attempts: "Too many incorrect attempts. Please request a new code.",
   wrong: "Incorrect code \u2014 please check and try again.",
 };
+function otpEmailText(code) {
+  return "Hello,\n\nUse this verification code to reset your NovaWallet password:\n\n" + code + "\n\nThis code expires in 2 minutes. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.\n\nIf you didn't request a password reset, please ignore this email. Your password will stay unchanged.\n\nThank you,\nThe NovaWallet Team\nhttps://www.novawallet.pp.ua \u00B7 Support: support@novawallet.pp.ua\n\nThis is an automated message from NovaWallet. Please do not reply to this email.";
+}
+function otpEmailHtml(code) {
+  return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>" +
+  "<body style=\"margin:0;padding:0;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;\">" +
+  "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#f1f5f9;padding:32px 12px;\"><tr><td align=\"center\">" +
+  "<table role=\"presentation\" width=\"560\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;\">" +
+  "<tr><td style=\"background:linear-gradient(135deg,#7c3aed 0%,#06b6d4 100%);padding:28px 36px;\">" +
+  "<div style=\"font-size:24px;font-weight:bold;color:#ffffff;letter-spacing:.3px;\">NovaWallet</div>" +
+  "<div style=\"font-size:13px;color:#e0e7ff;margin-top:4px;\">Secure digital wallet</div></td></tr>" +
+  "<tr><td style=\"padding:32px 36px 8px;\">" +
+  "<div style=\"font-size:17px;font-weight:bold;color:#0f172a;\">Password reset verification</div>" +
+  "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:12px 0 0;\">Hello,</p>" +
+  "<p style=\"font-size:14px;line-height:1.65;color:#475569;margin:8px 0 0;\">Use the verification code below to reset your NovaWallet password:</p></td></tr>" +
+  "<tr><td style=\"padding:20px 36px 4px;\">" +
+  "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:18px 12px;text-align:center;font-size:34px;font-weight:bold;letter-spacing:10px;color:#4c1d95;\">" + code + "</div></td></tr>" +
+  "<tr><td style=\"padding:16px 36px 28px;\">" +
+  "<p style=\"font-size:13px;line-height:1.65;color:#64748b;margin:0;\">This code expires in <b>2 minutes</b>. Do not share it with anyone \u2014 NovaWallet will never ask you for this code.</p>" +
+  "<p style=\"font-size:13px;line-height:1.65;color:#64748b;margin:10px 0 0;\">If you didn't request a password reset, please ignore this email. Your password will stay unchanged.</p></td></tr>" +
+  "<tr><td style=\"border-top:1px solid #e2e8f0;padding:18px 36px;background-color:#f8fafc;\">" +
+  "<div style=\"font-size:12px;color:#94a3b8;line-height:1.6;\">Thank you,<br><b style=\"color:#64748b;\">The NovaWallet Team</b><br><a href=\"https://www.novawallet.pp.ua\" style=\"color:#7c3aed;text-decoration:none;\">novawallet.pp.ua</a> \u00B7 Support: support@novawallet.pp.ua</div></td></tr>" +
+  "</table>" +
+  "<div style=\"font-size:11px;color:#94a3b8;margin-top:16px;\">This is an automated message from NovaWallet. Please do not reply to this email.</div>" +
+  "</td></tr></table></body></html>";
+}
 async function handlePasswordRequestOtp(request, env, body) {
   const db = env.DB;
   const email = String(body.email || "").trim().toLowerCase();
@@ -2136,23 +2170,29 @@ async function handlePasswordRequestOtp(request, env, body) {
   const user = await db.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (user) {
     const now = Date.now();
-    const prev = await db.prepare("SELECT last_sent_at FROM password_otps WHERE email = ?").bind(email).first();
-    if (!prev || now - Number(prev.last_sent_at || 0) > 60000) {
-      const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
-      const codeHash = await sha256Hex(email + ":" + code);
-      await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
-        .bind(email, user.id, codeHash, now + 10 * 60000, now).run();
-      if (smtpReady) {
-        const r = await sendEmail(env, {
-          to: email,
-          subject: "Your NovaWallet verification code",
-          text: "Hello,\n\nYour NovaWallet password reset code is: " + code + "\n\nIt expires in 10 minutes. Enter it in the app to reset your password.\n\nIf you didn't request this, you can ignore this email \u2014 your password stays unchanged.\n\n\u2014 NovaWallet\nsupport@novawallet.pp.ua",
-        });
-        if (!r.sent) { try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(user.id, ("smtp_failed: " + r.reason).slice(0, 500)).run(); } catch { /* ignore */ } }
-      }
+    const prev = await db.prepare("SELECT code_hash, expires_at FROM password_otps WHERE email = ?").bind(email).first();
+    // Resend lock: while a code is still valid it stays the ONLY code — no
+    // new email goes out, and the caller is told how long to wait. This is
+    // enforced server-side, so it holds even if the user leaves the screen
+    // and comes back.
+    if (prev?.code_hash && Number(prev.expires_at) > now) {
+      return json(request, { ok: true, emailed: smtpReady, waitSeconds: Math.ceil((Number(prev.expires_at) - now) / 1000) });
+    }
+    const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+    const codeHash = await sha256Hex(email + ":" + code);
+    await db.prepare("INSERT INTO password_otps (email, user_id, code_hash, expires_at, attempts, grant_hash, grant_expires, last_sent_at) VALUES (?, ?, ?, ?, 0, NULL, NULL, ?) ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, grant_hash = NULL, grant_expires = NULL, last_sent_at = excluded.last_sent_at")
+      .bind(email, user.id, codeHash, now + 2 * 60000, now).run();
+    if (smtpReady) {
+      const r = await sendEmail(env, {
+        to: email,
+        subject: "Your NovaWallet verification code",
+        text: otpEmailText(code),
+        html: otpEmailHtml(code),
+      });
+      if (!r.sent) { try { await db.prepare("INSERT INTO client_errors (user_id, message, stack, url) VALUES (?, ?, '', '')").bind(user.id, ("smtp_failed: " + r.reason).slice(0, 500)).run(); } catch { /* ignore */ } }
     }
   }
-  return json(request, { ok: true, emailed: smtpReady });
+  return json(request, { ok: true, emailed: smtpReady, waitSeconds: 0 });
 }
 async function handlePasswordVerifyOtp(request, env, body) {
   const db = env.DB;

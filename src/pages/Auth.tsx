@@ -63,14 +63,22 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
     if (fpBusy) return
     setFpBusy(true)
     try {
+      const waitToast = (secs: number) => {
+        const m = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0')
+        toast({ kind: 'info', title: 'Please wait', body: `A code was already sent to ${fp.email}. It stays valid for ${m}:${ss} more — enter it below, or wait for it to expire to request a new one.` })
+      }
       const r = await requestEmailOtp(fp.email)
       if (r.error) { setErr(r.error); return }
       if (r.emailed) {
-        setFpMode('server'); setFpOtpDemo(null); setFpSent(true); setFpOtp(''); setFpOtpVerified(false); setErr('')
+        setFpMode('server'); setFpOtpDemo(null)
+        if (r.waitSeconds > 0) { waitToast(r.waitSeconds); setFpSent(true); setFpOtpVerified(false); setErr(''); return }
+        setFpSent(true); setFpOtp(''); setFpOtpVerified(false); setErr('')
       } else {
         const lr = requestPasswordOtp(fp.email)
         if (lr.error) { setErr(lr.error); return }
-        setFpMode('local'); setErr(''); setFpOtpDemo(lr.otp); setFpSent(true); setFpOtp(''); setFpOtpVerified(false)
+        setFpMode('local')
+        if (lr.waitSeconds > 0) { waitToast(lr.waitSeconds); setFpOtpDemo(null); setFpSent(true); setFpOtpVerified(false); setErr(''); return }
+        setErr(''); setFpOtpDemo(lr.otp); setFpSent(true); setFpOtp(''); setFpOtpVerified(false)
       }
     } finally { setFpBusy(false) }
   }
@@ -274,7 +282,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
               ) : !fpOtpVerified ? (
                 <>
                   <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3.5 text-center">
-                    <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{fp.email}</b>. It expires in 10 minutes.</p>
+                    <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{fp.email}</b>. It expires in 2 minutes.</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">Don't see it in your inbox? Please check your <b>spam or junk folder</b> — sometimes it lands there.</p>
                     {fpOtpDemo && <p className="text-xs font-bold text-violet-600 dark:text-violet-300 mt-2.5">Demo mode — your code is shown here: <span className="font-mono text-base tracking-[.3em]">{fpOtpDemo}</span></p>}
                   </div>

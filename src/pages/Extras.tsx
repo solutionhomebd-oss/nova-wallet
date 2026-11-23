@@ -454,7 +454,7 @@ export function CardsPage() {
       <PageHead title={t('nav_cards')} sub={t('cards_soon_title')} />
       <div className="max-w-md space-y-5">
         <div>
-          <div className="[perspective:1400px] cursor-pointer select-none" onClick={() => setFlipped(f => !f)} role="button" aria-label={t('cards_flip_hint')}>
+          <div className="@container [perspective:1400px] cursor-pointer select-none" onClick={() => setFlipped(f => !f)} role="button" aria-label={t('cards_flip_hint')}>
             <div className={`relative aspect-[8/5] transition-transform duration-700 [transform-style:preserve-3d] ${flipped ? '[transform:rotateY(180deg)]' : ''}`}>
               <div className="absolute inset-0 [backface-visibility:hidden] overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 text-white shadow-2xl shadow-violet-600/30">
                 <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-white/10" />
@@ -481,20 +481,20 @@ export function CardsPage() {
                 </div>
               </div>
               <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-800 via-indigo-950 to-violet-900 text-white shadow-2xl shadow-violet-600/30">
-                <div className="h-8 bg-neutral-900 mt-3" />
-                <div className="px-5 sm:px-6 pt-2.5">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
-                  <div className="mt-1.5 flex items-stretch gap-2">
-                    <div className="flex-1 bg-slate-100 rounded h-8" />
-                    <div className="bg-white text-slate-900 rounded px-2.5 py-1 text-center shrink-0"><span className="block text-[8px] font-extrabold tracking-widest text-slate-500">CVV</span><span className="block font-mono font-bold leading-none">***</span></div>
+                <div className="h-[8.5cqw] mt-[4cqw]" />
+                <div className="px-[6cqw] pt-[3cqw]">
+                  <p className="text-[2.4cqw] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
+                  <div className="mt-[1.6cqw] flex items-stretch gap-[2cqw]">
+                    <div className="flex-1 bg-slate-100 rounded h-[8.5cqw]" />
+                    <div className="bg-white text-slate-900 rounded px-[2.5cqw] py-[1cqw] text-center shrink-0"><span className="block text-[2.1cqw] font-extrabold tracking-widest text-slate-500">CVV</span><span className="block font-mono font-bold leading-none text-[3.6cqw]">***</span></div>
                   </div>
-                  <div className="mt-2.5 space-y-0 text-[10px] leading-tight text-white/85 font-semibold">
+                  <div className="mt-[2.6cqw] space-y-0 text-[2.7cqw] leading-[1.3] text-white/85 font-semibold">
                     <p>www.novawallet.pp.ua</p>
                     <p>support@novawallet.pp.ua</p>
                   </div>
-                  <div className="mt-2 flex items-end gap-3">
-                    <p className="flex-1 text-[8px] leading-snug text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
-                    <span className="shrink-0"><LogoMark size={24} /></span>
+                  <div className="mt-[2cqw] flex items-end gap-[3cqw]">
+                    <p className="flex-1 text-[2.2cqw] leading-[1.4] text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
+                    <span className="shrink-0 block w-[6.5cqw]"><LogoMark size={24} className="block w-full h-auto" /></span>
                   </div>
                 </div>
               </div>

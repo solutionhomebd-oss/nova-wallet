@@ -36,7 +36,7 @@ export default function Profile() {
   useEffect(() => {
     const done = () => setAppInstalled(true)
     window.addEventListener('appinstalled', done)
-    return () => window.removeEventListener('appinstalled', done) }
+    return () => window.removeEventListener('appinstalled', done)
   }, [])
   const doInstall = async () => {
     if (appInstalled) return toast({ kind: 'success', title: 'NovaWallet is already installed on this device.' })

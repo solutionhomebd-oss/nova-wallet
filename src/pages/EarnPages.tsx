@@ -6,12 +6,12 @@ import { PageHead, SuccessModal } from './Services'
 import { fmtUSDT, fmtDateTime } from '../lib/utils'
 import { ADS_PER_DAY, CHECKIN_REWARDS, EARN_TASKS, QUIZ, SCRATCH_PER_DAY, SPINS_PER_DAY, WHEEL_PRIZES } from '../lib/earn'
 
-const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
-const yesterdayStr = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' })
+const yesterdayStr = () => { const t = new Date(todayStr() + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10) }
 
 const REWARD_TITLES = ['Daily check-in reward', 'Watched ad reward', 'Spin Wheel reward', 'Scratch card reward', 'Task reward:', 'Daily quiz reward']
 const isRewardTx = (x: { category: string; title: string }) => x.category === 'earn' && REWARD_TITLES.some(t => x.title.startsWith(t))
-const isToday = (iso: string) => { const d = new Date(iso); const n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate() }
+const isToday = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' }) === todayStr()
 
 export function EarnSummary() {
   const { db, user } = useApp()
@@ -218,9 +218,8 @@ export function ScratchPage() {
   const info = earnInfo()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [prize, setPrize] = useState<number | null>(null)
-  const [left, setLeft] = useState(SCRATCH_PER_DAY - info.scratches)
+  const left = SCRATCH_PER_DAY - info.scratches
   const [revealed, setRevealed] = useState(false)
-  const [exhausted, setExhausted] = useState(false)
   const drawing = useRef(false)
   const drawnOnce = useRef(false)
 
@@ -237,11 +236,11 @@ export function ScratchPage() {
   }
   const draw = async () => {
     const r = await scratchDraw()
-    if (r.err) { setExhausted(true); return }
-    setPrize(r.prize ?? 0); setLeft(r.left ?? 0); setRevealed(false)
+    if (r.err) { toast({ kind: 'error', title: r.err }); return }
+    setPrize(r.prize ?? 0); setRevealed(false)
     requestAnimationFrame(paintCover)
   }
-  useEffect(() => { if (!drawnOnce.current) { drawnOnce.current = true; draw() } }, [])
+  useEffect(() => { if (!drawnOnce.current) { drawnOnce.current = true; if (left > 0) draw() } }, [])
   const scratchAt = (e: React.PointerEvent) => {
     if (revealed || prize === null) return
     const c = canvasRef.current; if (!c) return
@@ -274,7 +273,7 @@ export function ScratchPage() {
       <EarnSummary />
       <Card className="p-5">
         <div className="mb-4"><Pips total={SCRATCH_PER_DAY} used={info.scratches} color="bg-amber-500" /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.scratches} of {SCRATCH_PER_DAY} cards used today</p></div>
-        {exhausted || (prize === null && left <= 0) ? (
+        {(prize === null && left <= 0) ? (
           <p className="text-center font-bold text-slate-500 py-10">No scratch cards left today — come back tomorrow. 🎫</p>
         ) : (
           <>

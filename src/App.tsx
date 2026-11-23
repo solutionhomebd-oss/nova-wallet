@@ -4,6 +4,7 @@ import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 're
 const Market = lazy(() => import('./pages/Market'))
 const Admin = lazy(() => import('./pages/Admin'))
 import { AppProvider, useApp } from './lib/store'
+import InstallBanner from './components/InstallBanner'
 import Layout from './components/Layout'
 import AdminShell from './components/AdminShell'
 import { PageLoader } from './components/LogoLoader'
@@ -171,6 +172,7 @@ export default function App() {
         <Toasts />
         <LockGate />
         <SystemNotifier />
+        <InstallBanner />
         <Suspense fallback={<PageLoader label="Loading…" />}>
         <Routes>
           <Route path="/home" element={<Navigate to="/" replace />} />
@@ -188,7 +190,8 @@ export default function App() {
             <Route path="/support" element={<SupportListPage />} />
             <Route path="/support/:ticketId" element={<SupportChatPage />} />
 
-            <Route path="/withdraw" element={<DirectWithdraw />} />
+            <Route path="/payment" element={<DirectWithdraw />} />
+            <Route path="/withdraw" element={<Navigate to="/payment" replace />} />
             <Route path="/earn" element={<EarnPage />} />
             <Route path="/earn/checkin" element={<CheckinPage />} />
             <Route path="/earn/ads" element={<AdsPage />} />

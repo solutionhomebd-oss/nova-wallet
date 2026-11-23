@@ -886,13 +886,12 @@ async function handleWithdraw(request, env, auth, body) {
 }
 
 async function handleDirectWithdraw(request, env, auth, body) {
-  return json(request, { error: "Direct Withdraw is coming soon." }, 403);
   if (await featureOff(db, "withdrawals")) return json(request, { error: "Withdrawals are temporarily unavailable. Please try again later." }, 403);
   const { method, amount, destination } = body;
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);
   const me = await getUserRow(db, auth.uid);
   if (!me) return json(request, { error: "Account not found." }, 404);
-  if (Number(me.level) < 2) return json(request, { error: "Direct Withdraw needs a Level 2 account. Please upgrade first." }, 400);
+  if (Number(me.level) < 2) return json(request, { error: "Payment needs a Level 2 account. Please upgrade first." }, 400);
   if (me.status === "frozen") return json(request, { error: "Your wallet is frozen. Contact support." }, 400);
   if (me.status === "suspended") return json(request, { error: "Your account is suspended. Contact support." }, 400);
   const suErr = await stepUpGate(db, auth.uid, amount);
@@ -905,7 +904,7 @@ async function handleDirectWithdraw(request, env, auth, body) {
   const bals = await getBalances(db, wallet.id);
   if (amount > balOf(bals, "BDT")) return json(request, { error: "Insufficient available balance." }, 400);
   const id = pubId("WDR");
-  const t = txStmt(db, { userId: auth.uid, category: "direct_withdraw", title: "Direct Withdraw to " + method, amount, fee, status: "completed", method, note: "Instant withdrawal — no admin review", ip: clientIp(request) });
+  const t = txStmt(db, { userId: auth.uid, category: "direct_withdraw", title: "Payment to " + method, amount, fee, status: "completed", method, note: "Instant payment — no admin review", ip: clientIp(request) });
   try {
     await db.batch([
       adjStmt(db, wallet.id, "BDT", -amount),
@@ -1126,9 +1125,31 @@ async function handleLoanFee(request, env, auth, body) {
 
 const EARN_CAPS = {
   checkin: { perDay: 1, max: 100 }, ad: { perDay: 10, max: 50 },
-  spin: { perDay: 5, max: 150 }, scratch: { perDay: 5, max: 150 },
+  spin: { perDay: 5, max: 150 }, scratch: { perDay: 3, max: 150 },
   task: { perDay: 20, max: 250 }, quiz: { perDay: 1, max: 250 },
 };
+
+async function handleAppBonus(request, env, auth) {
+  const db = env.DB;
+  const me = await getUserRow(db, auth.uid);
+  if (!me) return json(request, { error: "Account not found." }, 404);
+  if (me.app_bonus_at) return json(request, { ok: true, already: true, state: await loadState(db, auth.uid) });
+  const claim = await db.prepare("UPDATE users SET app_bonus_at = ? WHERE id = ? AND app_bonus_at IS NULL").bind(nowISO(), auth.uid).run();
+  if (!claim?.meta?.changes) return json(request, { ok: true, already: true, state: await loadState(db, auth.uid) });
+  const settings = await getSettings(db);
+  const amount = Math.round(2 * (Number(settings.bdtPerUsd) || 121));
+  const wallet = await getWallet(db, auth.uid);
+  const t = txStmt(db, { userId: auth.uid, category: "earn", title: "App install bonus", amount, note: "app_bonus", ip: clientIp(request) });
+  try {
+    await db.batch([adjStmt(db, wallet.id, "BDT", amount), t.stmt]);
+  } catch (e) {
+    await db.prepare("UPDATE users SET app_bonus_at = NULL WHERE id = ?").bind(auth.uid).run().catch(() => {});
+    return json(request, { error: "Bonus failed — please try again." }, 500);
+  }
+  await notifyServer(db, auth.uid, "earn", "\u{1F389} $2 app bonus added", "Thanks for installing the NovaWallet app — your $2 install bonus is in your balance.", "/transactions");
+  await sendUserEmail(env, db, auth.uid, "account", "Your $2 app install bonus \u{1F389}", "You got the $2 app bonus!", ["Thanks for installing the NovaWallet app.", "Your $2 install bonus has been added to your available balance."], fmtTk(amount));
+  return json(request, { ok: true, credited: true, amount, state: await loadState(db, auth.uid) });
+}
 
 async function handleEarnClaim(request, env, auth, body) {
   const db = env.DB;
@@ -1138,10 +1159,12 @@ async function handleEarnClaim(request, env, auth, body) {
   const cap = EARN_CAPS[kind];
   if (!cap) return json(request, { error: "Unknown reward kind." }, 400);
   if (badAmount(amount) || amount > cap.max) return json(request, { error: "Invalid reward amount." }, 400);
-  const today = new Date().toISOString().slice(0, 10);
+  const dhakaDay = new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+  const dayStart = new Date(dhakaDay + "T00:00:00+06:00").toISOString();
+  const dayEnd = new Date(Date.parse(dayStart) + 86400e3).toISOString();
   const cnt = await db.prepare(
-    "SELECT COUNT(*) AS c FROM transactions WHERE user_id = ? AND category = 'earn' AND note = ? AND created_at LIKE ?"
-  ).bind(auth.uid, "earn:" + kind, today + "%").first();
+    "SELECT COUNT(*) AS c FROM transactions WHERE user_id = ? AND category = 'earn' AND note = ? AND created_at >= ? AND created_at < ?"
+  ).bind(auth.uid, "earn:" + kind, dayStart, dayEnd).first();
   if (Number(cnt?.c ?? 0) >= cap.perDay) return json(request, { error: "Daily limit reached for this reward." }, 400);
   const wallet = await getWallet(db, auth.uid);
   const safeTitle = String(title || "Earn reward").slice(0, 80);
@@ -3092,6 +3115,7 @@ export default {
           case "/v1/loan/repay": return await handleLoanRepay(request, env, auth, body);
           case "/v1/loan/fee": return await handleLoanFee(request, env, auth, body);
           case "/v1/earn/claim": return await handleEarnClaim(request, env, auth, body);
+          case "/v1/app-bonus/claim": return await handleAppBonus(request, env, auth);
           case "/v1/kyc/submit": return await handleKycSubmit(request, env, auth, body);
           case "/v1/paymethods/save": return await handlePayMethodSave(request, env, auth, body);
           case "/v1/paymethods/delete": return await handlePayMethodDelete(request, env, auth, body);

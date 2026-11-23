@@ -123,6 +123,7 @@ interface Ctx {
   settleDepositExternal: (id: string, ok: boolean, providerRef?: string) => Promise<void>
   requestWithdraw: (p: { method: string; amount: number; destination: string; pin: string }) => Promise<string | null>
   directWithdraw: (p: { method: string; amount: number; destination: string }) => Promise<string | null>
+  claimAppBonus: () => Promise<string | null>
   stake: (amount: number, apy: number, termDays: number) => Promise<string | null>
   unstake: (stakeId: string) => Promise<string | null>
   swap: (fromSym: string, toSym: string, amountFrom: number, prices: Record<string, number>) => Promise<string | null>
@@ -1288,7 +1289,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
     } catch (e: any) { toast({ kind: 'error', title: e.message }) }
   }
-  const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+  const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' })
   const freshEarn = (userId: string): EarnState => ({ userId, day: todayStr(), lastCheckin: '', streak: 0, ads: 0, spins: 0, scratches: 0, tasksDone: [], quizDay: '' })
   const normEarn = (st: EarnState): EarnState => st.day === todayStr() ? st : { ...st, day: todayStr(), ads: 0, spins: 0, scratches: 0 }
   const earnStateIn = (d: DB, userId: string): EarnState => {
@@ -1296,6 +1297,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!st) { st = freshEarn(userId); d.earnStates.push(st) }
     Object.assign(st, normEarn(st))
     return st
+  }
+  const snapEarn = () => {
+    if (!user) return null
+    const st = dbRef.current.earnStates.find(x => x.userId === user.id)
+    return { userId: user.id, state: st ? { ...st, tasksDone: [...st.tasksDone] } : null }
+  }
+  const rollbackEarn = (snap: { userId: string; state: EarnState | null } | null) => {
+    if (!snap) return
+    mutate(d => {
+      const i = d.earnStates.findIndex(x => x.userId === snap.userId)
+      if (!snap.state) { if (i >= 0) d.earnStates.splice(i, 1) }
+      else if (i >= 0) Object.assign(d.earnStates[i], { ...snap.state, tasksDone: [...snap.state.tasksDone] })
+    })
+  }
+  const claimAppBonus: Ctx['claimAppBonus'] = async () => {
+    try {
+      const r = await apiPost('/v1/app-bonus/claim', {})
+      applyMoneyResult(r)
+      if ((r as any)?.credited) toast({ kind: 'success', title: '🎉 $2 app bonus!', body: 'Your app install bonus was added to your balance.' })
+      return null
+    } catch (e: any) { return e.message }
   }
   const claimEarn = async (kind: string, amount: number, title: string): Promise<string | null> => {
     try { const r = await apiPost('/v1/earn/claim', { kind, amount, title }); applyMoneyResult(r); return null }
@@ -1310,6 +1332,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; amount?: number; streak?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       const today = todayStr()
@@ -1322,13 +1345,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       box.credit = { amount, title: 'Daily check-in reward (day ' + st.streak + ')' }
       out = { amount, streak: st.streak }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('checkin', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('checkin', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const watchAdReward: Ctx['watchAdReward'] = async () => {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; amount?: number; left?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       if (st.ads >= ADS_PER_DAY) { out = { err: 'No ads left today — come back tomorrow.' }; return }
@@ -1337,13 +1361,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       box.credit = { amount, title: 'Watched ad reward' }
       out = { amount, left: ADS_PER_DAY - st.ads }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('ad', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('ad', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const spinReward: Ctx['spinReward'] = async () => {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; prize?: number; index?: number; left?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       if (st.spins >= SPINS_PER_DAY) { out = { err: 'No free spins left today — come back tomorrow.' }; return }
@@ -1353,13 +1378,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (prize > 0) box.credit = { amount: prize, title: 'Spin Wheel reward' }
       out = { prize, index, left: SPINS_PER_DAY - st.spins }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('spin', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('spin', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const scratchDraw: Ctx['scratchDraw'] = async () => {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; prize?: number; left?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       if (st.scratches >= SCRATCH_PER_DAY) { out = { err: 'No scratch cards left today — come back tomorrow.' }; return }
@@ -1368,7 +1394,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (prize > 0) box.credit = { amount: prize, title: 'Scratch card reward' }
       out = { prize, left: SCRATCH_PER_DAY - st.scratches }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('scratch', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('scratch', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const completeEarnTask: Ctx['completeEarnTask'] = async (taskId) => {
@@ -1377,6 +1403,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!task) return { err: 'Unknown task' }
     let out: { err?: string; amount?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       if (st.tasksDone.includes(taskId)) { out = { err: 'Task already completed' }; return }
@@ -1384,13 +1411,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       box.credit = { amount: task.reward, title: 'Task reward: ' + task.title }
       out = { amount: task.reward }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('task', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('task', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const submitQuiz: Ctx['submitQuiz'] = async (correct) => {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; amount?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
+    const snap = snapEarn()
     mutate(d => {
       const st = earnStateIn(d, user.id)
       if (st.quizDay === todayStr()) { out = { err: 'You already played the quiz today.' }; return }
@@ -1399,7 +1427,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (amount > 0) box.credit = { amount, title: 'Daily quiz reward (' + correct + '/5 correct)' }
       out = { amount }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('quiz', c.amount, c.title); if (err) return { err } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('quiz', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const setLoanFee: Ctx['setLoanFee'] = async (loanId, amount) => {
@@ -1829,8 +1857,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value: Ctx = {
     db, user, theme, themePref, setThemePref, toggleTheme, toasts, toast, dismissToast, login, register, walletOf,
-    addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing withdrawal…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
-    applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
+    addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing payment…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
+    applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimAppBonus, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
     updateProfile, changePassword, changePin, stepUp, revokeSession, joinCardWishlist, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, checkUsername, addTicket, replyTicket, startChatVerify, setChatVerify, sendChatPin, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit,

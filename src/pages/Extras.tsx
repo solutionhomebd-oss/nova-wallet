@@ -50,7 +50,7 @@ export function DirectWithdraw() {
   const fullMethod = isCrypto ? 'Crypto Wallet · ' + activeNetwork : activeOut
   const destLabel = !isCrypto ? 'Destination account / number / address' : activeNetwork === 'Binance Pay' ? 'Binance Pay ID / email' : 'Wallet address'
   const submit = async () => {
-    if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum direct withdraw is ' + fmtMoney(50) })
+    if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum payment is ' + fmtMoney(50) })
     if (!dest.trim()) return toast({ kind: 'error', title: 'Enter the destination account' })
     if (user && user.level < 2) return setGate(true)
     const suThD = db.settings.stepUpThresholdBdt ?? 0
@@ -61,33 +61,23 @@ export function DirectWithdraw() {
     const err = await directWithdraw({ method: fullMethod, amount: amtBDT, destination: dest.trim() })
     if (err) return setErrMsg(err)
     setLastTx({ amount: amtBDT, method: fullMethod }); setDone(true); setAmount(''); setDwStep(0)
-    toast({ kind: 'success', title: 'Withdrawal completed', body: 'Money sent instantly — no admin review needed.' })
+    toast({ kind: 'success', title: 'Payment completed', body: 'Money sent instantly — no admin review needed.' })
   }
   if (!user) return null
-  return (
-    <div>
-      <PageHead title="Direct Withdraw" sub="Instant · No PIN needed · Level 2" />
-      <Card className="p-8 text-center space-y-2">
-        <p className="text-4xl">🚧</p>
-        <p className="font-extrabold text-lg">Coming Soon</p>
-        <p className="text-sm text-slate-500">Direct Withdraw is coming soon. For now, please use Cash Out instead.</p>
-      </Card>
-    </div>
-  )
   if (db.settings.features?.withdrawals === false) return (
     <div>
-      <PageHead title="Direct Withdraw" sub="Instant · No PIN needed · Level 2" />
-      <FeatureOff label="Direct Withdraw" />
+      <PageHead title="Payment" sub="Instant · No PIN needed · Level 2" />
+      <FeatureOff label="Payment" />
     </div>
   )
   return (
     <div>
-      <PageHead title="Direct Withdraw" sub={`Instant · No PIN needed · Level 2 · ${t('available')} (cash): ${fmtMoney(w?.available ?? 0)}${(w?.holdings.USDT ?? 0) > 0 ? ` · Incl. USDT: ${fmtMoney((w?.available ?? 0) + (w?.holdings.USDT ?? 0) * db.settings.bdtPerUsd)}` : ''}`} />
+      <PageHead title="Payment" sub={`Instant · No PIN needed · Level 2 · ${t('available')} (cash): ${fmtMoney(w?.available ?? 0)}${(w?.holdings.USDT ?? 0) > 0 ? ` · Incl. USDT: ${fmtMoney((w?.available ?? 0) + (w?.holdings.USDT ?? 0) * db.settings.bdtPerUsd)}` : ''}`} />
       <Card className="p-5">
         <StepBar steps={['Details', 'Review']} current={dwStep} />
         {dwStep === 0 ? (
         <div className="space-y-4 anim-fade-up">
-        <Select label="Withdrawal method" value={activeOut} onChange={(e: any) => setMethod(e.target.value)}>{outMethods.map(m => <option key={m}>{m}</option>)}</Select>
+        <Select label="Payment method" value={activeOut} onChange={(e: any) => setMethod(e.target.value)}>{outMethods.map(m => <option key={m}>{m}</option>)}</Select>
         {isCrypto && <Select label="Crypto network / transfer system" value={activeNetwork} onChange={(e: any) => setNetwork(e.target.value)}>{CRYPTO_NETWORK_LABELS.map(n => <option key={n}>{n}</option>)}</Select>}
         <div className="relative">
           <Input label={`Amount (${currency})`} type="number" value={amount} onChange={e => setAmount(e.target.value)} />
@@ -96,14 +86,14 @@ export function DirectWithdraw() {
         {currency !== 'BDT' && amt > 0 && <p className="text-xs text-slate-400 -mt-2">≈ {fmtUSDT(amtBDT / db.settings.bdtPerUsd)} at today's rate.</p>}
         <Input label={destLabel} value={dest} onChange={e => setDest(e.target.value)} />
         <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4 space-y-1.5 text-sm">
-          <div className="flex justify-between"><span className="text-slate-500">Withdrawal fee</span><span className="font-bold">{fmtMoney(fee)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Payment fee</span><span className="font-bold">{fmtMoney(fee)}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">You will receive</span><span className="font-bold text-emerald-600">{fmtMoney(Math.max(amtBDT - fee, 0))}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Speed</span><span className="font-bold text-emerald-600">⚡ Instant</span></div>
           <div className="flex justify-between"><span className="text-slate-500">PIN / password</span><span className="font-bold text-emerald-600">Not required</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Account level</span><span className="font-bold">Level 2+</span></div>
         </div>
-        <WizardNav nextLabel="Review withdrawal" onNext={() => {
-          if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum direct withdraw is ' + fmtMoney(50) })
+        <WizardNav nextLabel="Review payment" onNext={() => {
+          if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum payment is ' + fmtMoney(50) })
           if (!dest.trim()) return toast({ kind: 'error', title: 'Enter the destination account' })
           if (user && user.level < 2) return setGate(true)
           setDwStep(1)
@@ -118,22 +108,22 @@ export function DirectWithdraw() {
             <div className="flex justify-between"><span className="text-slate-500">Fee</span><span className="font-bold">{fmtMoney(fee)}</span></div>
             <div className="flex justify-between border-t border-slate-200 dark:border-slate-700 pt-2"><span className="text-slate-500">You will receive</span><span className="font-extrabold text-emerald-600">{fmtMoney(Math.max(amtBDT - fee, 0))}</span></div>
           </div>
-          <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/25 p-4 text-sm"><b>⚡ Instant and final.</b> Direct withdrawals are sent immediately with no PIN and no review — double-check the destination before confirming.</div>
+          <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/25 p-4 text-sm"><b>⚡ Instant and final.</b> Payments are sent immediately with no PIN and no review — double-check the destination before confirming.</div>
           <StepUpField amountBdt={amtBDT} value={stepPw} onChange={setStepPw} />
-          <WizardNav onBack={() => setDwStep(0)} nextLabel="Confirm — Withdraw now" onNext={submit} />
+          <WizardNav onBack={() => setDwStep(0)} nextLabel="Confirm — Pay now" onNext={submit} />
         </div>
         )}
       </Card>
-      <h3 className="font-extrabold mt-6 mb-3">Direct withdrawal history</h3>
-      {mine.length === 0 ? <Card><Empty title="No direct withdrawals yet" /></Card> : (
+      <h3 className="font-extrabold mt-6 mb-3">Payment history</h3>
+      {mine.length === 0 ? <Card><Empty title="No payments yet" /></Card> : (
         <div className="space-y-2">{mine.map(x => (
           <Card key={x.id} className="p-4 flex items-center gap-3"><TxDirIcon dir={txDirection(x.category, x.amount)} /><div className="flex-1"><p className="font-bold">{x.title}</p><p className="text-xs text-slate-400">{x.id} · {fmtDateTime(x.createdAt)}</p></div><div className="text-right"><p className={`font-bold ${txAmountCls(txDirection(x.category, x.amount))}`}>{txSign(txDirection(x.category, x.amount))}{fmtMoney(Math.abs(x.amount))}</p><Badge tone="green">completed</Badge></div></Card>
         ))}</div>
       )}
-      <Level2GateModal open={gate} onClose={() => setGate(false)} feature="Direct Withdraw" />
-      <SuccessModal open={done} onClose={() => setDone(false)} title="Withdrawal completed ⚡"
+      <Level2GateModal open={gate} onClose={() => setGate(false)} feature="Payment" />
+      <SuccessModal open={done} onClose={() => setDone(false)} title="Payment completed ⚡"
         rows={lastTx ? [['Amount', fmtMoney(lastTx?.amount ?? 0)], ['Method', lastTx?.method ?? ''], ['Speed', 'Instant'], ['Status', 'Completed']] : []} />
-      <ResultModal open={!!errMsg} onClose={() => setErrMsg('')} kind="error" title="Withdrawal failed" body={errMsg} />
+      <ResultModal open={!!errMsg} onClose={() => setErrMsg('')} kind="error" title="Payment failed" body={errMsg} />
     </div>
   )
 }
@@ -151,7 +141,7 @@ export function EarnPage() {
   if (!user) return null
   const einfo = earnInfo()
   const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
-  const todayL = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') })()
+  const todayL = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' })
   const rewardOptions = [
     { to: '/earn/checkin', icon: '📅', title: 'Daily Check-in', sub: 'Up to ' + usd(50) + ' a day', badge: einfo.lastCheckin === todayL ? '✓ Claimed' : 'Claim now' },
     { to: '/earn/ads', icon: '📺', title: 'View Ads', sub: usd(2) + '–' + usd(8) + ' per ad', badge: (ADS_PER_DAY - einfo.ads) + ' left today' },

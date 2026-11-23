@@ -554,6 +554,19 @@ export default function Admin() {
           </div>
         )}
 
+        {tab === 'wishlist' && (
+          <div className="anim-fade-up">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-extrabold">Cards wishlist</h3><Badge tone="violet">{(db.wishlist ?? []).length} joined</Badge></div>
+            {(db.wishlist ?? []).length === 0 ? <Card><Empty title="No card requests yet" body="KYC-verified users who tap Notify me on the Cards page will appear here." /></Card> : (db.wishlist ?? []).map(w => (
+              <Card key={w.id} className="p-4 mb-2 flex items-center gap-3">
+                <Avatar name={w.name || w.email} />
+                <div className="flex-1 min-w-0"><p className="font-bold truncate">{w.name}</p><p className="text-xs text-slate-400 truncate">{w.email} · @{w.username}</p></div>
+                <span className="text-xs text-slate-400 shrink-0">{fmtDateTime(w.createdAt)}</span>
+              </Card>
+            ))}
+          </div>
+        )}
+
         {tab === 'support' && <SupportChat />}
         {tab === 'txs' && (
           <div className="space-y-3">

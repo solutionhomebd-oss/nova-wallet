@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeftRight, Award, BadgePercent, Globe, Nfc, Snowflake, TrendingDown, TrendingUp } from 'lucide-react'
 import LogoMark from '../components/LogoMark'
@@ -423,39 +423,82 @@ export function TradePage() {
   )
 }
 
-/** Cards — the owner's new main-nav section (2026-11-23), sitting between
- * Transactions and News. Virtual cards are not issuable yet, so the page is
- * an honest preview: a designed card carrying the user's own name and
- * NovaWallet address, the launch feature list, and a notify-me opt-in
- * (stored on-device). No fake card number, no fake functionality. */
+/** Cards — the owner's main-nav section (2026-11-23), between Transactions
+ * and News. Design + wishlist rules are the owner's (2026-11-23): the logo
+ * sits tile-less on the card, the chip carries SIM-style contact lines,
+ * there is no "Card holder" label (the name alone), and tapping the card
+ * flips it to a realistic back (magnetic stripe, signature strip, masked
+ * CVV ***, website + support email, fine print). "Notify me" is a real
+ * server wishlist: KYC-verified accounts only — anyone else gets the
+ * verify-first toast — and joining sends the user a confirmation email
+ * and lists them in Admin → Users → Cards Wishlist. */
 export function CardsPage() {
-  const { user, t, toast } = useApp()
-  const [notified, setNotified] = useState(() => { try { return localStorage.getItem('nova.cardsNotify') === '1' } catch { return false } })
+  const { user, t, toast, joinCardWishlist } = useApp()
+  const [flipped, setFlipped] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const chipId = useId().replace(/[^a-zA-Z0-9]/g, '')
   if (!user) return null
+  const joined = !!user.cardWishlistJoined
   const addr = (user.novaAddress ?? '').replace(/(.{4})/g, '$1 ').trim()
-  const notify = () => { try { localStorage.setItem('nova.cardsNotify', '1') } catch { /* storage unavailable */ } setNotified(true); toast({ kind: 'success', title: t('cards_notified') }) }
+  const notify = async () => {
+    if (user.kyc !== 'verified') return toast({ kind: 'error', title: t('cards_verify_first'), body: t('cards_verify_body') })
+    setBusy(true)
+    const err = await joinCardWishlist()
+    setBusy(false)
+    if (err === 'kyc_required') return toast({ kind: 'error', title: t('cards_verify_first'), body: t('cards_verify_body') })
+    if (err) return toast({ kind: 'error', title: err })
+    toast({ kind: 'success', title: t('cards_notified') })
+  }
   return (
     <div>
       <PageHead title={t('nav_cards')} sub={t('cards_soon_title')} />
       <div className="max-w-md space-y-5">
-        <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 text-white shadow-2xl shadow-violet-600/30 aspect-[8/5]">
-          <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-white/10" />
-          <div className="absolute -bottom-24 -left-10 w-56 h-56 rounded-full bg-black/10" />
-          <div className="relative p-6 h-full flex flex-col">
-            <div className="flex items-start justify-between">
-              <span className="rounded-2xl shadow-lg shadow-black/20 inline-flex overflow-hidden"><LogoMark size={44} /></span>
-              <span className="text-[11px] font-extrabold tracking-[0.25em] uppercase bg-white/20 rounded-full px-3 py-1.5">{t('cards_virtual')}</span>
-            </div>
-            <div className="mt-5 flex items-center gap-3">
-              <div className="w-11 h-8 rounded-md bg-gradient-to-br from-amber-200 to-amber-400 border border-amber-100/70 shadow-inner" />
-              <Nfc size={22} className="opacity-80" />
-            </div>
-            <p className="mt-4 font-mono tracking-[0.14em] text-[13px] sm:text-sm break-all">{addr}</p>
-            <div className="mt-auto flex items-end justify-between gap-3">
-              <div className="min-w-0"><p className="text-[10px] uppercase tracking-[0.2em] text-white/70">{t('cards_holder')}</p><p className="font-bold uppercase truncate">{user.name}</p></div>
-              <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] bg-white/20 rounded-full px-2.5 py-1 shrink-0">{t('cards_preview')}</span>
+        <div>
+          <div className="[perspective:1400px] cursor-pointer select-none" onClick={() => setFlipped(f => !f)} role="button" aria-label={t('cards_flip_hint')}>
+            <div className={`relative aspect-[8/5] transition-transform duration-700 [transform-style:preserve-3d] ${flipped ? '[transform:rotateY(180deg)]' : ''}`}>
+              <div className="absolute inset-0 [backface-visibility:hidden] overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 text-white shadow-2xl shadow-violet-600/30">
+                <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-white/10" />
+                <div className="absolute -bottom-24 -left-10 w-56 h-56 rounded-full bg-black/10" />
+                <div className="relative p-6 h-full flex flex-col">
+                  <div className="flex items-start justify-between">
+                    <LogoMark size={44} />
+                    <span className="text-[11px] font-extrabold tracking-[0.25em] uppercase bg-white/20 rounded-full px-3 py-1.5">{t('cards_virtual')}</span>
+                  </div>
+                  <div className="mt-5 flex items-center gap-3">
+                    <svg width="46" height="34" viewBox="0 0 46 34" aria-hidden="true">
+                      <defs><linearGradient id={'nwchip' + chipId} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#fde68a" /><stop offset="100%" stopColor="#f59e0b" /></linearGradient></defs>
+                      <rect x="0.6" y="0.6" width="44.8" height="32.8" rx="5" fill={`url(#nwchip${chipId})`} stroke="#92400e" strokeOpacity="0.45" />
+                      <path d="M1 12 H15 M1 22 H15 M45 12 H31 M45 22 H31 M15 7 V27 M31 7 V27" stroke="#92400e" strokeOpacity="0.55" strokeWidth="1.1" fill="none" />
+                      <rect x="15" y="12" width="16" height="10" rx="2" fill="none" stroke="#92400e" strokeOpacity="0.55" strokeWidth="1.1" />
+                    </svg>
+                    <Nfc size={22} className="opacity-80" />
+                  </div>
+                  <p className="mt-4 font-mono tracking-[0.14em] text-[13px] sm:text-sm break-all">{addr}</p>
+                  <div className="mt-auto flex items-end justify-between gap-3">
+                    <p className="font-bold uppercase truncate text-lg">{user.name}</p>
+                    <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] bg-white/20 rounded-full px-2.5 py-1 shrink-0">{t('cards_preview')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-800 via-indigo-950 to-violet-900 text-white shadow-2xl shadow-violet-600/30">
+                <div className="h-11 bg-neutral-900 mt-5" />
+                <div className="px-6 pt-4">
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
+                  <div className="mt-1.5 flex items-stretch gap-2">
+                    <div className="flex-1 bg-slate-100 text-slate-800 rounded px-3 py-2 font-serif italic text-lg leading-none truncate">{user.name}</div>
+                    <div className="bg-white text-slate-900 rounded px-2.5 py-1 text-center shrink-0"><span className="block text-[8px] font-extrabold tracking-widest text-slate-500">CVV</span><span className="block font-mono font-bold leading-none">***</span></div>
+                  </div>
+                  <div className="mt-4 space-y-0.5 text-[11px] text-white/85 font-semibold">
+                    <p>www.novawallet.pp.ua</p>
+                    <p>support@novawallet.pp.ua</p>
+                  </div>
+                  <p className="mt-3 text-[9px] leading-relaxed text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
+                  <div className="mt-2 flex justify-end"><LogoMark size={26} /></div>
+                </div>
+              </div>
             </div>
           </div>
+          <p className="text-center text-xs text-slate-400 mt-2.5">{t('cards_flip_hint')}</p>
         </div>
         <Card className="p-6 space-y-4">
           <h3 className="font-extrabold text-lg">{t('cards_soon_title')}</h3>
@@ -465,7 +508,7 @@ export function CardsPage() {
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Snowflake size={16} /></span>{t('cards_feat_freeze')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><BadgePercent size={16} /></span>{t('cards_feat_fee')}</li>
           </ul>
-          <Btn className="w-full" disabled={notified} onClick={notify}>{notified ? '✓ ' + t('cards_notified') : t('cards_notify')}</Btn>
+          <Btn className="w-full" disabled={joined || busy} onClick={notify}>{joined ? '✓ ' + t('cards_notified') : busy ? '…' : t('cards_notify')}</Btn>
         </Card>
       </div>
     </div>

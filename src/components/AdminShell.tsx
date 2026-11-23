@@ -15,6 +15,7 @@ export const TABS = [
   { id: 'loans', label: 'Loans', icon: HandCoins },
   { id: 'referrals', label: 'Referrals', icon: Gift },
   { id: 'levels', label: 'Levels', icon: Award },
+  { id: 'wishlist', label: 'Cards Wishlist', icon: CreditCard },
   { id: 'support', label: 'Support Chat', icon: MessageCircle },
   { id: 'broadcast', label: 'Broadcast', icon: Send },
   { id: 'news', label: 'News', icon: Newspaper },
@@ -35,7 +36,7 @@ export const TABS = [
  * are unchanged, so scopes, badges and deep links keep working. */
 export const MENU_GROUPS = [
   { id: 'g-finance', label: 'Finance', icon: Wallet, children: ['deposits', 'withdrawals', 'txs'] },
-  { id: 'g-users', label: 'Users', icon: Users, children: ['users', 'kyc', 'levels'] },
+  { id: 'g-users', label: 'Users', icon: Users, children: ['users', 'kyc', 'levels', 'wishlist'] },
   { id: 'g-content', label: 'Content', icon: Newspaper, children: ['broadcast', 'news', 'banners'] },
   { id: 'g-settings', label: 'Settings', icon: SettingsIcon, children: ['settings', 'features', 'payments', 'danger'] },
   { id: 'g-system', label: 'System', icon: Server, children: ['audit', 'reports', 'health', 'emaillog'] },
@@ -103,7 +104,7 @@ export function AdminMenuNav({ tabs, badges, active, onGo }: { tabs: readonly Me
 export const SCOPE_TABS: Record<string, string[]> = {
   finance: ['overview', 'deposits', 'withdrawals', 'txs', 'users', 'loans', 'referrals', 'levels', 'reports', 'audit'],
   content: ['overview', 'users', 'support', 'broadcast', 'news', 'banners', 'audit'],
-  support: ['overview', 'users', 'kyc', 'support'],
+  support: ['overview', 'users', 'kyc', 'wishlist', 'support'],
 }
 
 /** The admin panel's own chrome — top bar + sidebar/drawer — for standalone

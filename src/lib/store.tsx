@@ -29,6 +29,7 @@ function load(): DB {
       if (!db.levelRequests) db.levelRequests = []
       if (!db.stakes) db.stakes = []
       if (!db.earnStates) db.earnStates = []
+      if (!db.wishlist) db.wishlist = []
       if (!db.sec) db.sec = {}
       if (!db.settings.payMethods) db.settings.payMethods = DEFAULT_PAY_METHODS
       // normalize payment methods to the structured model (bank / crypto kinds);
@@ -161,6 +162,7 @@ interface Ctx {
   changePin: (oldPin: string, newPin: string) => Promise<string | null>
   stepUp: (password: string) => Promise<string | null>
   revokeSession: (id: string) => Promise<string | null>
+  joinCardWishlist: () => Promise<string | null>
   markTicketRead: (ticketId: string, asAdmin: boolean) => Promise<void>
   toggleWatch: (symbol: string) => void
   markAllRead: () => void; markRead: (id: string) => void
@@ -516,6 +518,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.emailVerified !== undefined) lu.emailVerified = state.profile.emailVerified
       if (state.profile.pinHash) lu.pinHash = state.profile.pinHash
       if (state.profile.novaAddress) lu.novaAddress = state.profile.novaAddress
+      if (state.profile.cardWishlistJoined !== undefined) lu.cardWishlistJoined = state.profile.cardWishlistJoined
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
@@ -592,6 +595,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (Array.isArray(ov.content.levels) && ov.content.levels.length) d.levels = ov.content.levels
     }
     if (Array.isArray(ov.audit)) d.audit = ov.audit
+    if (Array.isArray(ov.wishlist)) d.wishlist = fix(mapRows(ov.wishlist))
     if (ov.tickets) {
       const merged = mergeTicketMsgs(d.tickets, ov.tickets)
       const serverIds = new Set(merged.map((t: any) => t.id))
@@ -1584,6 +1588,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null
     } catch (e: any) { return e?.message || 'Could not sign out that device.' }
   }
+  const joinCardWishlist: Ctx['joinCardWishlist'] = async () => {
+    if (!user) return 'Not signed in'
+    try {
+      await apiPost('/v1/cards/wishlist', {})
+      mutate(d => { const lu = d.users.find(x => x.id === user.id); if (lu) lu.cardWishlistJoined = true })
+      return null
+    } catch (e: any) { return e?.message === 'kyc_required' ? 'kyc_required' : (e?.message || 'Could not join the wishlist.') }
+  }
   const markTicketRead: Ctx['markTicketRead'] = async (ticketId, asAdmin) => {
     try {
       const r = await apiPost('/v1/tickets/read', { ticketId, asAdmin })
@@ -1819,7 +1831,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     db, user, theme, themePref, setThemePref, toggleTheme, toasts, toast, dismissToast, login, register, walletOf,
     addDeposit: guardBusy('Adding money…', addDeposit), decideDeposit, settleDepositExternal, requestWithdraw: guardBusy('Requesting cash out…', requestWithdraw), decideWithdraw, directWithdraw: guardBusy('Processing withdrawal…', directWithdraw), stake: guardBusy('Staking…', stake), unstake, swap: guardBusy('Swapping…', swap), sendMoney: guardBusy('Sending money…', sendMoney), verifyTxPin, buyCrypto: guardBusy('Buying crypto…', buyCrypto), sellCrypto: guardBusy('Selling crypto…', sellCrypto),
     applyLoan: guardBusy('Submitting loan application…', applyLoan), earnInfo, claimCheckin, watchAdReward, spinReward, scratchDraw, completeEarnTask, submitQuiz, decideLoan, repayLoan: guardBusy('Processing repayment…', repayLoan), setLoanFee, submitLoanFee, confirmLoanFee, submitKyc, decideKyc, setUserStatus, adjustBalance, txHold, txUnhold, txCancel, adminBuyCrypto, adminSellCrypto, adminReleaseStake, adminClearLocked,
-    updateProfile, changePassword, changePin, stepUp, revokeSession, markTicketRead, toggleWatch, markAllRead, markRead,
+    updateProfile, changePassword, changePin, stepUp, revokeSession, joinCardWishlist, markTicketRead, toggleWatch, markAllRead, markRead,
     publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, checkUsername, addTicket, replyTicket, startChatVerify, setChatVerify, sendChatPin, deleteTicket, resolveTicket, broadcast, setAdminScope, setAdminRole, adminErrors, resetDemo,
     requestUpgrade, decideUpgrade, updateLevelDef, setUserLevel, adminResetPin, setUserLoanLimit,
     locked, appInstalled, devicePinSet, fingerprintSet, setDevicePin, clearDevicePin, setupFingerprint, clearFingerprint, unlockWithPin, unlockWithFingerprint, unlockWithPassword, lockNow, signOut, resetPassword, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, requestEmailOtp, verifyEmailOtp, resetPasswordByGrant, resetPasswordByPin, requestRegOtp, confirmRegOtp, emailPrefs, setTxEmails, startEmailChange, verifyCurrentEmail, requestNewEmailOtp, confirmEmailChange, addUserPayMethod, updateUserPayMethod, removeUserPayMethod, lang, setLanguage, t, currency, currencyIsAuto, detectedCurrency: detected.code, setCurrency, fmtMoney, fmtAmount, toBDT, fromBDT,

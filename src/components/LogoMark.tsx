@@ -8,14 +8,10 @@ import { useId } from 'react'
 // subtree fail on mobile Chrome: the visible logo renders as an empty tile.
 export default function LogoMark({ size = 34, className = '' }: { size?: number; className?: string }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
-  const tile = `nw-tile-${uid}`, bars = `nw-bars-${uid}`, shade = `nw-shade-${uid}`, clip = `nw-clip-${uid}`
+  const bars = `nw-bars-${uid}`, shade = `nw-shade-${uid}`, clip = `nw-clip-${uid}`, shadow = `nw-shadow-${uid}`
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" className={className} role="img" aria-label="NovaWallet">
       <defs>
-        <linearGradient id={tile} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1d2042" />
-          <stop offset="100%" stopColor="#101223" />
-        </linearGradient>
         <linearGradient id={bars} gradientUnits="userSpaceOnUse" x1="8" y1="0" x2="92" y2="0">
           <stop offset="0%" stopColor="#9b30ff" />
           <stop offset="45%" stopColor="#7a5cff" />
@@ -27,6 +23,9 @@ export default function LogoMark({ size = 34, className = '' }: { size?: number;
           <stop offset="42%" stopColor="#ffffff" stopOpacity="0" />
           <stop offset="100%" stopColor="#000000" stopOpacity="0.28" />
         </linearGradient>
+        <filter id={shadow} x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="2.5" stdDeviation="2" floodColor="#000000" floodOpacity="0.25" />
+        </filter>
         <clipPath id={clip}>
         <rect x="10.0" y="10.2" width="2.2" height="79.4" rx="1.1" />
         <rect x="13.5" y="10.4" width="2.2" height="79.2" rx="1.1" />
@@ -54,12 +53,10 @@ export default function LogoMark({ size = 34, className = '' }: { size?: number;
         <rect x="87.7" y="10.2" width="2.2" height="79.4" rx="1.1" />
         </clipPath>
       </defs>
-      {/* Theme-aware tile: pure white in light mode so the mark sits cleanly
-          on light headers / the pastel lock screen; the original dark navy
-          tile in dark mode. (Owner, 2026-11-23: the dark tile clashed with
-          the light theme.) */}
-      <rect x="0" y="0" width="100" height="100" rx="22" fill="#ffffff" className="dark:hidden" />
-      <rect x="0" y="0" width="100" height="100" rx="22" fill={`url(#${tile})`} className="hidden dark:block" />
+      {/* No background tile (owner, 2026-11-23): the bars sit directly on
+          whatever surface the logo is placed on, with only a soft drop
+          shadow under the mark so it never reads as a separate badge. */}
+      <g filter={`url(#${shadow})`}>
       <g fill={`url(#${bars})`}>
         <rect x="10.0" y="10.2" width="2.2" height="79.4" rx="1.1" />
         <rect x="13.5" y="10.4" width="2.2" height="79.2" rx="1.1" />
@@ -88,6 +85,7 @@ export default function LogoMark({ size = 34, className = '' }: { size?: number;
       </g>
       <g clipPath={`url(#${clip})`}>
         <rect x="0" y="0" width="100" height="100" fill={`url(#${shade})`} />
+      </g>
       </g>
     </svg>
   )

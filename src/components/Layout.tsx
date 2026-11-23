@@ -14,7 +14,7 @@ const NAV = [
 export function Logo({ size = 34 }: { size?: number }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="rounded-2xl shadow-lg shadow-violet-600/30 shrink-0 inline-flex overflow-hidden"><LogoMark size={size} /></span>
+      <span className="shrink-0 inline-flex"><LogoMark size={size} /></span>
       <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white">Nova<span className="text-violet-500">Wallet</span></span>
     </div>
   )

@@ -13,7 +13,7 @@ export interface User {
   pinFailCount?: number; pinLockedUntil?: string
   passwordHash: string; pinHash: string; role: Role; status: UserStatus; kyc: KycStatus
   referralCode: string
-  novaAddress?: string; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
+  novaAddress?: string; cardWishlistJoined?: boolean; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
   /** Firebase UID once the account is linked to the backend (Phase 1+). */
   fbUid?: string
   /** RBAC scope for admin accounts (server-side, D1 users.admin_scope):
@@ -115,6 +115,8 @@ export interface ChatMsg { id: string; from: 'user' | 'admin' | 'system'; text: 
 export interface SupportTicket { id: string; userId: string; subject: string; message?: string; status: 'pending' | 'processing' | 'resolved'; verifyStatus?: string | null; route?: string; rating?: string | null; ratingAsked?: boolean; createdAt: string; updatedAt: string; messages: ChatMsg[]; userReadAt?: string | null; adminReadAt?: string | null; userFetchedAt?: string | null; adminFetchedAt?: string | null }
 
 export interface Stake { id: string; userId: string; amount: number; apy: number; termDays: number; startAt: string; status: 'active' | 'closed'; /** Set once the 'stake matured' notification has been sent. */ maturedNotified?: boolean }
+export interface WishlistEntry { id: string; userId: string; name: string; email: string; username: string; createdAt: string }
+
 export interface DB {
   users: User[]; wallets: Wallet[]; txs: Tx[]; ledger: LedgerEntry[]
   deposits: DepositReq[]; withdrawals: WithdrawReq[]; loans: Loan[]
@@ -123,4 +125,5 @@ export interface DB {
   sessions: SessionInfo[]
   levels: LevelDef[]; levelRequests: LevelRequest[]; stakes: Stake[]; earnStates: EarnState[]; sec: Record<string, { fails: number; lockedUntil: number }>
   watchlist: Record<string, string[]>; referralEarnings: { id: string; userId: string; fromUser: string; amount: number; createdAt: string }[]
+  wishlist: WishlistEntry[]
 }

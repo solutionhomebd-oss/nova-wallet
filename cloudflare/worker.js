@@ -400,6 +400,7 @@ async function loadState(db, uid, lite = false) {
   const loanRows = await db.prepare("SELECT * FROM loans WHERE user_id = ? ORDER BY created_at DESC").bind(uid).all();
   const stkRows = await db.prepare("SELECT * FROM stakes WHERE user_id = ? ORDER BY created_at DESC").bind(uid).all();
   const kycRow = await db.prepare("SELECT status, doc_type, doc_number, created_at FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(uid).first();
+  const wlRow = await db.prepare("SELECT id FROM card_wishlist WHERE user_id = ?").bind(uid).first();
   const prefRow = await db.prepare("SELECT tx_emails FROM user_email_prefs WHERE user_id = ?").bind(uid).first();
   const pmRows = await db.prepare("SELECT * FROM user_payment_methods WHERE user_id = ? ORDER BY created_at").bind(uid).all();
   const state = {
@@ -410,6 +411,7 @@ async function loadState(db, uid, lite = false) {
       pinHash: me.pin_hash || "", novaAddress: me.nova_address || "",
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
+      cardWishlistJoined: !!wlRow,
       ...(kycRow ? { kycDocType: kycRow.doc_type, kycDocNumber: kycRow.doc_number, kycSubmittedAt: isoOf(kycRow.created_at) } : {}),
     },
     emailPrefs: { txEmails: !prefRow || Number(prefRow.tx_emails) !== 0 },
@@ -519,6 +521,7 @@ async function loadOverview(db, lite = false) {
     errors: lite ? undefined : errRows.results.map((e) => ({ id: e.id, userId: e.user_id, message: e.message, url: e.url, createdAt: isoOf(e.created_at) })),
     audit: auditRows.results.map((a) => ({ id: String(a.id), actor: a.actor, action: a.action, detail: a.detail, createdAt: isoOf(a.created_at) })),
     emailLog: lite ? undefined : emailRows.results.map((e) => ({ id: e.id, to: e.to_email, kind: e.kind, subject: e.subject, status: e.status, error: e.error || undefined, createdAt: new Date(Number(e.created_at)).toISOString() })),
+    wishlist: (await db.prepare("SELECT w.id AS id, w.user_id AS user_id, w.created_at AS created_at, u.email AS email, u.username AS username, p.full_name AS full_name FROM card_wishlist w JOIN users u ON u.id = w.user_id LEFT JOIN user_profiles p ON p.user_id = u.id ORDER BY w.created_at DESC LIMIT 200").all()).results.map((r) => ({ id: r.id, userId: r.user_id, name: r.full_name || "", email: r.email, username: r.username, createdAt: isoOf(r.created_at) })),
     cannedReplies: (await getSettingKey(db, "canned_replies", null)) || DEFAULT_CANNED,
   };
 }
@@ -1680,6 +1683,26 @@ async function handleTicketDelete(request, env, auth, body) {
   ]);
   await auditLog(db, auth, "ticket.delete", ticketId + " · " + tk.subject + " · user " + tk.user_id);
   return json(request, { ok: true, overview: await loadOverview(db) });
+}
+
+async function handleCardWishlistJoin(request, env, auth, body) {
+  const db = env.DB;
+  const uid = auth.uid;
+  // KYC gate (owner's rule, 2026-11-23): only verified accounts may join.
+  const kycRow = await db.prepare("SELECT status FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(uid).first();
+  if (kycRow?.status !== "verified") return json(request, { error: "kyc_required" }, 403);
+  const existing = await db.prepare("SELECT id FROM card_wishlist WHERE user_id = ?").bind(uid).first();
+  if (existing) return json(request, { ok: true, already: true });
+  await db.prepare("INSERT INTO card_wishlist (id, user_id, created_at) VALUES (?, ?, ?)").bind(pubId("CWL"), uid, new Date().toISOString()).run();
+  const me = await getUserRow(db, uid);
+  const first = (me?.full_name || "").split(" ")[0] || "there";
+  await sendUserEmail(env, db, uid, "account", "You're on the NovaWallet card wishlist \u{1F4B3}", "You're on the list! \u{1F4B3}", [
+    "Hi " + first + ", good news \u2014 your request for a NovaWallet virtual card has been received, and your name is now on the priority Cards wishlist.",
+    "Virtual cards are in development. As a wishlist member, you will be among the very first to get access when they launch \u2014 pay online anywhere, straight from your NovaWallet balance.",
+    "Thanks for being an early supporter of NovaWallet.",
+  ], "\u{1F4B3} Virtual Card Wishlist \u2014 Joined");
+  await notifyServer(db, uid, "info", "\u{1F4B3} You're on the Cards wishlist", "Your virtual card request was received. We'll notify you the moment Cards launch.", "/cards");
+  return json(request, { ok: true, joined: true });
 }
 
 async function handleTicketPinReveal(request, env, auth, body) {
@@ -3083,6 +3106,7 @@ export default {
           case "/v1/tickets": return await handleTicketCreate(request, env, auth, body);
           case "/v1/tickets/reply": return await handleTicketReply(request, env, auth, body);
           case "/v1/tickets/pin-reveal": return await handleTicketPinReveal(request, env, auth, body);
+          case "/v1/cards/wishlist": return await handleCardWishlistJoin(request, env, auth, body);
           case "/v1/admin/user-notes": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserNotes(request, env, auth, body);
           case "/v1/admin/user-message": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserMessage(request, env, auth, body);
           case "/v1/admin/sessions/revoke": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminSessionRevoke(request, env, auth, body);

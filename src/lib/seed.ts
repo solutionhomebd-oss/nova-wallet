@@ -33,5 +33,6 @@ export function seedDB(): DB {
     watchlist: {},
     sec: {},
     referralEarnings: [],
+    wishlist: [],
   }
 }

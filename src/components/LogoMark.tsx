@@ -24,7 +24,7 @@ export default function LogoMark({ size = 34, className = '' }: { size?: number;
           <stop offset="100%" stopColor="#000000" stopOpacity="0.28" />
         </linearGradient>
         <filter id={shadow} x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="2.5" stdDeviation="2" floodColor="#000000" floodOpacity="0.25" />
+          <feDropShadow dx="0" dy="3.2" stdDeviation="2.6" floodColor="#000000" floodOpacity="0.38" />
         </filter>
         <clipPath id={clip}>
         <rect x="10.0" y="10.2" width="2.2" height="79.4" rx="1.1" />

@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeftRight, Award, BadgePercent, Globe, Nfc, Snowflake, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowLeftRight, Award, BadgePercent, Globe, Nfc, Snowflake, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
 import LogoMark from '../components/LogoMark'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
@@ -476,24 +476,26 @@ export function CardsPage() {
                   <p className="mt-4 font-mono tracking-[0.14em] text-[13px] sm:text-sm break-all">{addr}</p>
                   <div className="mt-auto flex items-end justify-between gap-3">
                     <p className="font-bold uppercase truncate text-lg">{user.name}</p>
-                    <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] bg-white/20 rounded-full px-2.5 py-1 shrink-0">{t('cards_preview')}</span>
+                    <span className="font-extrabold text-lg tracking-tight text-white drop-shadow-md shrink-0">Nova<span className="text-violet-500">Wallet</span></span>
                   </div>
                 </div>
               </div>
               <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-800 via-indigo-950 to-violet-900 text-white shadow-2xl shadow-violet-600/30">
-                <div className="h-11 bg-neutral-900 mt-5" />
-                <div className="px-6 pt-4">
+                <div className="h-9 bg-neutral-900 mt-4" />
+                <div className="px-6 pt-3">
                   <p className="text-[9px] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
                   <div className="mt-1.5 flex items-stretch gap-2">
-                    <div className="flex-1 bg-slate-100 text-slate-800 rounded px-3 py-2 font-serif italic text-lg leading-none truncate">{user.name}</div>
+                    <div className="flex-1 bg-slate-100 rounded h-9" />
                     <div className="bg-white text-slate-900 rounded px-2.5 py-1 text-center shrink-0"><span className="block text-[8px] font-extrabold tracking-widest text-slate-500">CVV</span><span className="block font-mono font-bold leading-none">***</span></div>
                   </div>
-                  <div className="mt-4 space-y-0.5 text-[11px] text-white/85 font-semibold">
+                  <div className="mt-3 space-y-0 text-[10px] leading-snug text-white/85 font-semibold">
                     <p>www.novawallet.pp.ua</p>
                     <p>support@novawallet.pp.ua</p>
                   </div>
-                  <p className="mt-3 text-[9px] leading-relaxed text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
-                  <div className="mt-2 flex justify-end"><LogoMark size={26} /></div>
+                  <div className="mt-2.5 flex items-end gap-3">
+                    <p className="flex-1 text-[8.5px] leading-snug text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
+                    <span className="shrink-0"><LogoMark size={24} /></span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -501,9 +503,10 @@ export function CardsPage() {
           <p className="text-center text-xs text-slate-400 mt-2.5">{t('cards_flip_hint')}</p>
         </div>
         <Card className="p-6 space-y-4">
-          <h3 className="font-extrabold text-lg">{t('cards_soon_title')}</h3>
+          <h3 className="font-extrabold text-lg flex items-center gap-2.5 flex-wrap"><span className="text-[11px] font-extrabold uppercase tracking-wider bg-emerald-500 text-white rounded-full px-2.5 py-1 shadow-lg shadow-emerald-500/40">{t('cards_free')}</span>{t('cards_soon_title')}</h3>
           <p className="text-sm text-slate-500 leading-relaxed">{t('cards_soon_body')}</p>
           <ul className="space-y-3 text-sm font-semibold">
+            <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Sparkles size={16} /></span>{t('cards_feat_issuance')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Globe size={16} /></span>{t('cards_feat_online')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Snowflake size={16} /></span>{t('cards_feat_freeze')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><BadgePercent size={16} /></span>{t('cards_feat_fee')}</li>

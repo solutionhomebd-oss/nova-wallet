@@ -16,7 +16,7 @@ export default function LogoLoader({ size = 60 }: { size?: number }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
   const grad = `nw-load-${uid}`
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="Loading" style={{ filter: 'drop-shadow(0 6px 18px rgba(139,92,246,0.35))' }}>
+    <svg width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="Loading" style={{ filter: 'drop-shadow(0 7px 20px rgba(139,92,246,0.5))' }}>
       <defs>
         <linearGradient id={grad} gradientUnits="userSpaceOnUse" x1="8" y1="0" x2="92" y2="0">
           <stop offset="0%" stopColor="#9b30ff" />

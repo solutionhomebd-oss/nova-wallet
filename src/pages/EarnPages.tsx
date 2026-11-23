@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { Btn, Card } from '../components/ui'
-import { PageHead, SuccessModal } from './Services'
+import { PageHead } from './Services'
 import { fmtUSDT, fmtDateTime } from '../lib/utils'
 import { ADS_PER_DAY, CHECKIN_REWARDS, EARN_TASKS, QUIZ, SCRATCH_PER_DAY, SPINS_PER_DAY, WHEEL_PRIZES } from '../lib/earn'
 
@@ -70,16 +70,14 @@ export function CheckinPage() {
   const continuing = info.lastCheckin === yesterdayStr()
   const filled = claimed ? ((info.streak - 1) % 7) + 1 : continuing ? info.streak % 7 : 0
   const nextReward = CHECKIN_REWARDS[filled % 7]
-  const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null)
   const claim = async () => {
     const r = await claimCheckin()
     if (r.err) return toast({ kind: 'error', title: r.err })
-    setOkModal({ title: 'Check-in reward ✓', rows: [['Reward', '+' + usd(r.amount ?? 0)], ['Streak', 'Day ' + r.streak], ['Status', 'Added to your balance'], ['Next', 'Come back tomorrow for the next reward']] })
+    toast({ kind: 'success', title: 'Check-in reward ✓', body: '+' + usd(r.amount ?? 0) + ' · Day ' + r.streak + ' streak · Added to your balance — come back tomorrow for the next reward.' })
   }
   return (
     <div>
       <BackLink />
-      <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <PageHead title="Daily Check-in" sub="Check in every day to build your streak — longer streaks pay more." />
       <EarnSummary />
       <Card className="p-5">
@@ -130,17 +128,15 @@ export function AdsPage() {
       })
     }, 100)
   }
-  const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null)
   const claim = async () => {
     const r = await watchAdReward()
     if (r.err) return toast({ kind: 'error', title: r.err })
-    setOkModal({ title: 'Ad reward ✓', rows: [['Reward', '+' + usd(r.amount ?? 0)], ['Ads left today', String(r.left ?? 0)], ['Status', 'Added to your balance']] })
+    toast({ kind: 'success', title: 'Ad reward ✓', body: '+' + usd(r.amount ?? 0) + ' · ' + (r.left ?? 0) + ' ads left today · Added to your balance' })
     setPhase('idle'); setProgress(0); setAdIdx(i => i + 1)
   }
   return (
     <div>
       <BackLink />
-      <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <PageHead title="View Ads" sub={`Watch a short ad and earn ${usd(2)}–${usd(8)} each time. ${left} of ${ADS_PER_DAY} left today.`} />
       <EarnSummary />
       <Card className="p-5">
@@ -312,16 +308,14 @@ export function TasksPage() {
       })
     }, 1000)
   }
-  const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null)
   const claim = async (id: string) => {
     const r = await completeEarnTask(id)
     if (r.err) return toast({ kind: 'error', title: r.err })
-    setOkModal({ title: 'Task reward ✓', rows: [['Task', EARN_TASKS.find(x => x.id === id)?.title ?? id], ['Reward', '+' + usd(r.amount ?? 0)], ['Status', 'Added to your balance']] })
+    toast({ kind: 'success', title: 'Task reward ✓', body: (EARN_TASKS.find(x => x.id === id)?.title ?? id) + ' · +' + usd(r.amount ?? 0) + ' · Added to your balance' })
   }
   return (
     <div>
       <BackLink />
-      <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <PageHead title="Complete Tasks" sub="Finish simple tasks and earn USDT for each one. Tasks can be completed once." />
       <EarnSummary />
       <Card className="p-4 mb-4">

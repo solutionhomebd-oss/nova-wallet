@@ -3,22 +3,25 @@ import { useLocation } from 'react-router-dom'
 import { Download, X } from 'lucide-react'
 import LogoMark from './LogoMark'
 import { useApp } from '../lib/store'
+import { promptInstall } from '../lib/install'
 
 // Floating install banner: shown to website (browser) visitors only. It hides
-// forever once the app is installed / opened standalone, and for the rest of
-// the session when dismissed. Installing for real credits the $2 bonus: the
-// claim runs server-side on the first standalone launch (once per account).
+// once the app is installed / opened standalone. Dismissing it hides it for
+// the current sign-in only — the next fresh login from the website shows it
+// again. Installing for real credits the $2 bonus: the claim runs server-side
+// on the first standalone launch (once per account).
+const loginStamp = () => { try { return localStorage.getItem('nw.lastLoginAt') || '0' } catch { return '0' } }
+
 export default function InstallBanner() {
-  const { user, locked, appInstalled, claimAppBonus, t } = useApp()
+  const { user, locked, appInstalled, claimAppBonus, t, toast } = useApp()
   const location = useLocation()
-  const [dismissed, setDismissed] = useState(() => { try { return sessionStorage.getItem('nw.installBannerOff') === '1' } catch { return false } })
-  const [showHow, setShowHow] = useState(false)
+  const [offStamp, setOffStamp] = useState<string | null>(() => { try { return sessionStorage.getItem('nw.installBannerOff') } catch { return null } })
   const claimRef = useRef(claimAppBonus)
   claimRef.current = claimAppBonus
   const claimedFor = useRef<string | null>(null)
 
   useEffect(() => {
-    const done = () => setDismissed(true)
+    const done = () => setOffStamp(loginStamp())
     window.addEventListener('appinstalled', done)
     return () => window.removeEventListener('appinstalled', done)
   }, [])
@@ -30,17 +33,14 @@ export default function InstallBanner() {
     }
   }, [appInstalled, user?.id])
 
-  if (appInstalled || dismissed || locked || location.pathname.startsWith('/admin')) return null
+  const stamp = loginStamp()
+  if (appInstalled || locked || location.pathname.startsWith('/admin') || offStamp === stamp) return null
 
   const install = async () => {
-    const prompt = (window as any).__nwInstallPrompt
-    if (prompt) {
-      prompt.prompt()
-      const choice = await prompt.userChoice
-      if (choice?.outcome === 'accepted') (window as any).__nwInstallPrompt = null
-    } else setShowHow(v => !v)
+    const r = await promptInstall()
+    if (r === 'unavailable') toast({ kind: 'info', title: t('install_unavailable') })
   }
-  const close = () => { try { sessionStorage.setItem('nw.installBannerOff', '1') } catch { /* ignore */ } setDismissed(true) }
+  const close = () => { try { sessionStorage.setItem('nw.installBannerOff', stamp) } catch { /* ignore */ } setOffStamp(stamp) }
 
   return (
     <div className="fixed z-[80] inset-x-3 bottom-[86px] sm:inset-x-auto sm:right-5 sm:bottom-5 sm:w-[368px] anim-fade-up">
@@ -54,7 +54,6 @@ export default function InstallBanner() {
           </div>
         </div>
         <button onClick={install} className="mt-3 w-full py-2.5 rounded-2xl bg-white text-violet-700 font-extrabold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition shadow"><Download size={16} /> {t('install_now')}</button>
-        {showHow && <p className="mt-2.5 text-xs text-violet-100 leading-relaxed bg-white/10 rounded-xl px-3 py-2">{t('install_how')}</p>}
       </div>
     </div>
   )

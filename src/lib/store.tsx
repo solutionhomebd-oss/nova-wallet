@@ -829,6 +829,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     recordSuccess(u.id)
     mutate(d => { const du = d.users.find(x => x.id === u.id)!; du.lastLogin = nowISO(); if (fbUid) du.fbUid = fbUid })
     localStorage.setItem(SESSION, u.id); setUserId(u.id); setLocked(false)
+    try { localStorage.setItem('nw.lastLoginAt', String(Date.now())) } catch { /* ignore */ }
     if (idToken) void syncServerProfile(idToken, u)
     return null
   }

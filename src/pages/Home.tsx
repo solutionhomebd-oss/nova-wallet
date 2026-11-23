@@ -10,7 +10,7 @@ const ACTIONS_RAW: { to: string; labelKey: string; icon: any; g: string; soon?: 
   { to: '/add', labelKey: 'act_add', icon: ArrowDownToLine, g: 'from-emerald-500 to-teal-600' },
   { to: '/cashout', labelKey: 'act_cashout', icon: ArrowUpFromLine, g: 'from-rose-500 to-pink-600' },
   { to: '/send', labelKey: 'act_send', icon: Send, g: 'from-violet-500 to-purple-600' },
-  { to: '/payment', labelKey: 'act_withdraw', icon: Banknote, g: 'from-blue-500 to-indigo-600' },
+  { to: '/payment', labelKey: 'act_withdraw', icon: Banknote, g: 'from-blue-500 to-indigo-600', soon: true },
   { to: '/receive', labelKey: 'act_receive', icon: QrCode, g: 'from-cyan-500 to-blue-600' },
   { to: '/referral', labelKey: 'act_referral', icon: Gift, g: 'from-amber-500 to-orange-600' },
   { to: '/earn', labelKey: 'act_earn', icon: PiggyBank, g: 'from-lime-500 to-green-600' },

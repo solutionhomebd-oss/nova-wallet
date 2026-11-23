@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bell, Camera, Car, ChevronRight, Coins, CreditCard, Download, FileText, Fingerprint, Globe, Hash, HelpCircle, KeyRound, Lock, LogOut, Mail, MessageCircle, ScanFace, Send, ShieldCheck, Smartphone, Upload, UserRound, Loader2 } from 'lucide-react'
 import { useApp } from '../lib/store'
+import { promptInstall } from '../lib/install'
 import { apiPost } from '../lib/api'
 import { useMarket } from '../lib/market'
 import { Avatar, Badge, Btn, Card, Input, Modal, ModalActions, ModalDesc, ModalRow, PinBoxes, Select, useConfirm } from '../components/ui'
@@ -31,23 +32,16 @@ export default function Profile() {
     else if ((location.state as any)?.openSupport) { navigate('/support', { replace: true }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const [canInstall, setCanInstall] = useState(!!(window as any).__nwInstallPrompt)
   const [appInstalled, setAppInstalled] = useState(() => window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true)
   useEffect(() => {
-    const ready = () => setCanInstall(true)
-    const done = () => { setAppInstalled(true); setCanInstall(false) }
-    window.addEventListener('nw-install-ready', ready)
+    const done = () => setAppInstalled(true)
     window.addEventListener('appinstalled', done)
-    return () => { window.removeEventListener('nw-install-ready', ready); window.removeEventListener('appinstalled', done) }
+    return () => window.removeEventListener('appinstalled', done) }
   }, [])
   const doInstall = async () => {
     if (appInstalled) return toast({ kind: 'success', title: 'NovaWallet is already installed on this device.' })
-    const prompt = (window as any).__nwInstallPrompt
-    if (prompt) {
-      prompt.prompt()
-      const choice = await prompt.userChoice
-      if (choice?.outcome === 'accepted') { (window as any).__nwInstallPrompt = null; setCanInstall(false) }
-    } else setModal('install')
+    const r = await promptInstall()
+    if (r === 'unavailable') toast({ kind: 'info', title: t('install_unavailable') })
   }
   const [edit, setEdit] = useState({ name: user?.name ?? '', phone: user?.phone ?? '' })
   const [editPhoto, setEditPhoto] = useState<string | undefined>(user?.photo)
@@ -309,7 +303,7 @@ export default function Profile() {
       <Card className="p-2 mt-4">
         <button onClick={doInstall} className="w-full flex items-center gap-3 p-3.5 font-semibold text-[15px] hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-2xl text-left">
           <span className="text-violet-600"><Download size={18} /></span> Install App
-          <span className="ml-auto text-sm font-bold text-violet-600">{appInstalled ? 'Installed ✓' : canInstall ? 'Install' : 'How to install'}</span>
+          <span className="ml-auto text-sm font-bold text-violet-600">{appInstalled ? 'Installed ✓' : 'Install'}</span>
         </button>
       </Card>
 
@@ -738,7 +732,7 @@ export default function Profile() {
                   </div>
                   <div className="flex gap-2 mt-3.5">
                     {!fingerprintSet && appInstalled && <Btn className="!py-2.5 flex-1" onClick={async () => { const e = await setupFingerprint(); if (e) return toast({ kind: 'error', title: e }); toast({ kind: 'success', title: 'Fingerprint login is on', body: 'Unlock with one touch from now on.' }) }}><Fingerprint size={16} /> Set up fingerprint</Btn>}
-                    {!fingerprintSet && !appInstalled && <Btn className="!py-2.5 flex-1" onClick={() => setModal('install')}><Smartphone size={16} /> Install the app first</Btn>}
+                    {!fingerprintSet && !appInstalled && <Btn className="!py-2.5 flex-1" onClick={doInstall}><Smartphone size={16} /> Install the app first</Btn>}
                     {fingerprintSet && <Btn variant="ghost" className="!py-2.5 flex-1" onClick={() => { clearFingerprint(); toast({ kind: 'success', title: 'Fingerprint removed from this device' }) }}>Remove fingerprint</Btn>}
                   </div>
                 </div>
@@ -791,15 +785,6 @@ export default function Profile() {
             ))}
         </div>
         <ModalActions><Btn variant="ghost" className="w-full py-3.5" onClick={() => setModal(null)}>{t('done')}</Btn></ModalActions>
-      </Modal>
-      <Modal open={modal === 'install'} onClose={() => setModal(null)} title="Install NovaWallet">
-        <ModalDesc>NovaWallet works as a real app — no app store needed. It installs from this website and opens full-screen from your home screen or desktop.</ModalDesc>
-        <div className="space-y-2.5 text-sm">
-          <ModalRow><span>📱 <b>Android (Chrome):</b> tap <b>Install App</b> here, or Chrome menu ⋮ → <b>Install app / Add to Home screen</b>.</span></ModalRow>
-          <ModalRow><span>🍎 <b>iPhone (Safari):</b> tap the <b>Share</b> button → <b>Add to Home Screen</b> → <b>Add</b>.</span></ModalRow>
-          <ModalRow><span>💻 <b>Desktop (Chrome / Edge):</b> click the <b>install icon</b> at the right end of the address bar, or menu ⋮ → <b>Install NovaWallet</b>.</span></ModalRow>
-        </div>
-        <Btn className="w-full mt-4" onClick={() => { setModal(null); doInstall() }}>{canInstall ? 'Install now' : 'Got it'}</Btn>
       </Modal>
       <Modal open={modal === 'terms'} onClose={() => setModal(null)} title={t('p_terms')}>
         <div className="space-y-2.5">

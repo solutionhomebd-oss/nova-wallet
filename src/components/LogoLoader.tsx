@@ -1,10 +1,10 @@
 import { useId } from 'react'
 
 // The NovaWallet "N" as a loading indicator: the logo's 24 pulse bars
-// ripple in a travelling wave (each bar scales with a staggered delay —
-// see .nw-wave-bar in index.css). Bar geometry matches LogoMark exactly,
-// so the loader IS the logo, animated. Gradient ids are unique per
-// instance (useId) — the same rule LogoMark follows.
+// sway side to side in a travelling horizontal wave (each bar shifts with
+// a staggered delay — see .nw-wave-bar in index.css). Bar geometry matches
+// LogoMark exactly, so the loader IS the logo, animated. Gradient ids are
+// unique per instance (useId) — the same rule LogoMark follows.
 const BARS: [number, number, number][] = [
   [10.0, 10.2, 79.4], [13.5, 10.4, 79.2], [16.8, 10.2, 79.4], [20.3, 10.4, 79.2], [23.8, 10.2, 79.4], [27.1, 10.4, 79.2],
   [30.7, 10.4, 33.2], [34.2, 12.5, 35.5], [37.5, 16.8, 35.5], [40.4, 20.7, 35.4], [43.0, 24.0, 36.2], [46.3, 27.7, 36.6],

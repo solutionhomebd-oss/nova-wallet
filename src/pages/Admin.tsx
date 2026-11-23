@@ -305,7 +305,7 @@ export default function Admin() {
                 <Card key={d.id} className="p-4 mb-2 flex flex-wrap items-center gap-3">
                   <div className="flex-1 min-w-[180px]"><p className="font-bold">{usdt(d.amount)} · {d.method} — {nameOf(d.userId)}</p><p className="text-xs text-slate-400">{d.id} · TrxID {d.trxId}{d.receipt ? ' · 📎 ' + d.receipt : ''} · {fmtDateTime(d.createdAt)}</p><p className="mt-1 flex gap-1.5 flex-wrap"><span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${d.verification === 'auto' ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>{d.verification === 'auto' ? '⚡ AUTO-VERIFY' : '👤 MANUAL REVIEW'}</span>{d.providerRef && <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">PROVIDER {d.providerRef}</span>}</p></div>
                   <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                  {d.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => { decideDeposit(d.id, true); toast({ kind: 'success', title: 'Deposit approved & credited' }) }}><Check size={15} /> Approve</Btn><Btn variant="danger" className="!py-2" onClick={() => { decideDeposit(d.id, false); toast({ kind: 'info', title: 'Deposit rejected' }) }}><X size={15} /> Reject</Btn></>}
+                  {d.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => decideDeposit(d.id, true)}><Check size={15} /> Approve</Btn><Btn variant="danger" className="!py-2" onClick={() => decideDeposit(d.id, false)}><X size={15} /> Reject</Btn></>}
                 </Card>
               ))}
             </section>
@@ -315,7 +315,7 @@ export default function Admin() {
                 <Card key={d.id} className="p-4 mb-2 flex flex-wrap items-center gap-3">
                   <div className="flex-1 min-w-[180px]"><p className="font-bold">{usdt(d.amount)} · {d.method} — {nameOf(d.userId)}</p><p className="text-xs text-slate-400">{d.id} → {d.destination} · fee {usdt(d.fee)} · payable {usdt(d.amount - d.fee)} · {fmtDateTime(d.createdAt)}</p></div>
                   <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                  {d.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => { decideWithdraw(d.id, true); toast({ kind: 'success', title: 'Withdrawal completed' }) }}><Check size={15} /> Complete</Btn><Btn variant="danger" className="!py-2" onClick={() => { decideWithdraw(d.id, false); toast({ kind: 'info', title: 'Withdrawal rejected & refunded' }) }}><X size={15} /> Reject</Btn></>}
+                  {d.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => decideWithdraw(d.id, true)}><Check size={15} /> Complete</Btn><Btn variant="danger" className="!py-2" onClick={() => decideWithdraw(d.id, false)}><X size={15} /> Reject</Btn></>}
                 </Card>
               ))}
             </section>
@@ -432,7 +432,7 @@ export default function Admin() {
                   <div className="flex-1 min-w-[190px]"><p className="font-bold">{l.id} · {usdt(l.amount)} — {nameOf(l.userId)}</p><p className="text-xs text-slate-400">{l.months} mo · {l.ratePct}% · EMI {usdt(l.emi)} · Total {usdt(l.totalPayable)} · Paid {usdt(l.paid)} · {fmtDateTime(l.createdAt)}</p>
                     {l.status === 'active' && l.paid < l.totalPayable * 0.3 && <p className="text-xs text-amber-600 font-bold mt-0.5">Watch: low repayment progress</p>}</div>
                   <Badge tone={statusTone(l.status)}>{l.status}</Badge>
-                  {l.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => { decideLoan(l.id, true); toast({ kind: 'success', title: 'Loan approved & disbursed' }) }}>Approve & disburse</Btn><Btn variant="danger" className="!py-2" onClick={() => decideLoan(l.id, false)}>Reject</Btn></>}
+                  {l.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => decideLoan(l.id, true)}>Approve & disburse</Btn><Btn variant="danger" className="!py-2" onClick={() => decideLoan(l.id, false)}>Reject</Btn></>}
                 </div>
                 {l.applicantName && (
                   <div className="mt-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3.5 flex gap-3.5">
@@ -535,7 +535,7 @@ export default function Admin() {
                 <Card key={r.id} className="p-4 mb-2 flex flex-wrap items-center gap-3">
                   <div className="flex-1 min-w-[180px]"><p className="font-bold">{nameOf(r.userId)} — Level {r.fromLevel} → Level {r.toLevel}</p><p className="text-xs text-slate-400">{r.id} · {fmtDateTime(r.createdAt)}</p></div>
                   <Badge tone={statusTone(r.status)}>{r.status}</Badge>
-                  {r.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => { decideUpgrade(r.id, true); toast({ kind: 'success', title: 'Level upgraded' }) }}><Check size={15} /> Approve</Btn><Btn variant="danger" className="!py-2" onClick={() => decideUpgrade(r.id, false)}><X size={15} /> Reject</Btn></>}
+                  {r.status === 'pending' && <><Btn variant="success" className="!py-2" onClick={() => decideUpgrade(r.id, true)}><Check size={15} /> Approve</Btn><Btn variant="danger" className="!py-2" onClick={() => decideUpgrade(r.id, false)}><X size={15} /> Reject</Btn></>}
                 </Card>
               ))}
             </section>
@@ -1208,7 +1208,7 @@ export function AdminUserPage() {
                   {pendingReq && (
                     <div className="flex flex-wrap items-center gap-2 mt-2.5 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20 p-3">
                       <p className="flex-1 min-w-[140px] text-xs font-bold text-amber-700 dark:text-amber-300">Upgrade request pending: Level {pendingReq.fromLevel} → Level {pendingReq.toLevel}</p>
-                      <Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideUpgrade(pendingReq.id, true); toast({ kind: 'success', title: 'Level upgraded' }) }}>Approve</Btn>
+                      <Btn variant="success" className="!py-1.5 !text-xs" onClick={() => decideUpgrade(pendingReq.id, true)}>Approve</Btn>
                       <Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideUpgrade(pendingReq.id, false)}>Reject</Btn>
                     </div>
                   )}
@@ -1300,7 +1300,7 @@ export function AdminUserPage() {
                       <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
                         <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(d.amount)} · {d.method}</p><p className="text-xs text-slate-400">{d.id} · TrxID {d.trxId} · {fmtDateTime(d.createdAt)}</p></div>
                         <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideDeposit(d.id, true); toast({ kind: 'success', title: 'Deposit approved & credited' }) }}>Approve</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => { decideDeposit(d.id, false); toast({ kind: 'info', title: 'Deposit rejected' }) }}>Reject</Btn></>}
+                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => decideDeposit(d.id, true)}>Approve</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideDeposit(d.id, false)}>Reject</Btn></>}
                       </div>))}
                     </div>
                   </section>)}
@@ -1310,7 +1310,7 @@ export function AdminUserPage() {
                       <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
                         <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(d.amount)} · {d.method}</p><p className="text-xs text-slate-400">{d.id} → {d.destination} · fee {usdt(d.fee)} · {fmtDateTime(d.createdAt)}</p></div>
                         <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideWithdraw(d.id, true); toast({ kind: 'success', title: 'Withdrawal completed' }) }}>Complete</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => { decideWithdraw(d.id, false); toast({ kind: 'info', title: 'Withdrawal rejected & refunded' }) }}>Reject</Btn></>}
+                        {d.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => decideWithdraw(d.id, true)}>Complete</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideWithdraw(d.id, false)}>Reject</Btn></>}
                       </div>))}
                     </div>
                   </section>)}
@@ -1320,7 +1320,7 @@ export function AdminUserPage() {
                       <div key={l.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
                         <div className="flex-1 min-w-[170px]"><p className="font-bold text-sm">{usdt(l.amount)} · {l.months} months · {l.ratePct}%</p><p className="text-xs text-slate-400">{l.id} · EMI {usdt(l.emi)} · paid {usdt(l.paid)} of {usdt(l.totalPayable)} · {fmtDateTime(l.createdAt)}</p></div>
                         <Badge tone={statusTone(l.status)}>{l.status}</Badge>
-                        {l.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { decideLoan(l.id, true); toast({ kind: 'success', title: 'Loan approved & disbursed' }) }}>Approve & disburse</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideLoan(l.id, false)}>Reject</Btn></>}
+                        {l.status === 'pending' && <><Btn variant="success" className="!py-1.5 !text-xs" onClick={() => decideLoan(l.id, true)}>Approve & disburse</Btn><Btn variant="danger" className="!py-1.5 !text-xs" onClick={() => decideLoan(l.id, false)}>Reject</Btn></>}
                       </div>))}
                     </div>
                   </section>)}

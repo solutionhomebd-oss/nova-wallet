@@ -604,6 +604,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (r?.state) mutate(d => applyStateInto(d, user.id, r.state))
     if (r?.overview) mutate(d => applyOverviewInto(d, r.overview))
   }
+  // Re-pull the admin overview after a failed optimistic action, so the
+  // panel snaps back to the server's truth.
+  const resyncAdmin = async () => {
+    try { const ov = await apiGet('/v1/admin/overview'); if (ov?.overview) mutate(d => applyOverviewInto(d, ov.overview)) } catch { /* keep local state */ }
+  }
   const serverUidOf = (localId: string): string | null => {
     const u = dbRef.current.users.find(x => x.id === localId)
     return u?.fbUid ?? (u?.stub ? u.id : null)
@@ -1119,12 +1124,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // future provider/automation call the same Worker endpoint): balances,
   // the linked transaction and referral commission settle in D1 exactly once.
   const decideDeposit: Ctx['decideDeposit'] = async (id, ok) => {
-    try { const r = await apiPost('/v1/admin/decide-deposit', { id, ok }); applyMoneyResult(r) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    // Optimistic: the row updates the instant the admin clicks; the server
+    // response then confirms it (or a resync snaps it back on failure).
+    mutate(d => { const dep = d.deposits.find(x => x.id === id); if (dep) dep.status = ok ? 'approved' : 'rejected' })
+    try { const r = await apiPost('/v1/admin/decide-deposit', { id, ok }); applyMoneyResult(r); toast({ kind: ok ? 'success' : 'info', title: ok ? 'Deposit approved & credited' : 'Deposit rejected' }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
   }
   const settleDepositExternal: Ctx['settleDepositExternal'] = async (id, ok) => {
+    mutate(d => { const dep = d.deposits.find(x => x.id === id); if (dep) dep.status = ok ? 'approved' : 'rejected' })
     try { const r = await apiPost('/v1/admin/decide-deposit', { id, ok }); applyMoneyResult(r) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
   }
   const requestWithdraw: Ctx['requestWithdraw'] = async (p) => {
     if (!user) return 'Not signed in'
@@ -1186,8 +1195,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) { return e.message }
   }
   const decideWithdraw: Ctx['decideWithdraw'] = async (id, ok) => {
-    try { const r = await apiPost('/v1/admin/decide-withdraw', { id, ok }); applyMoneyResult(r) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    mutate(d => { const wd = d.withdrawals.find(x => x.id === id); if (wd) wd.status = ok ? 'completed' : 'rejected' })
+    try { const r = await apiPost('/v1/admin/decide-withdraw', { id, ok }); applyMoneyResult(r); toast({ kind: ok ? 'success' : 'info', title: ok ? 'Withdrawal completed' : 'Withdrawal rejected & refunded' }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
   }
   const verifyTxPin: Ctx['verifyTxPin'] = (pin) => {
     if (!user) return 'Not signed in'
@@ -1368,8 +1378,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     catch (e: any) { toast({ kind: 'error', title: e.message }) }
   }
   const decideLoan: Ctx['decideLoan'] = async (id, ok) => {
-    try { const r = await apiPost('/v1/admin/decide-loan', { id, ok }); applyMoneyResult(r) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }) }
+    mutate(d => { const ln = d.loans.find(x => x.id === id); if (ln) ln.status = ok ? 'active' : 'rejected' })
+    try { const r = await apiPost('/v1/admin/decide-loan', { id, ok }); applyMoneyResult(r); if (ok) toast({ kind: 'success', title: 'Loan approved & disbursed' }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
   }
   const repayLoan: Ctx['repayLoan'] = async (loan, amount) => {
     if (!user) return 'Not signed in'
@@ -1403,6 +1414,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const decideKyc: Ctx['decideKyc'] = async (userId2, ok) => {
     const target = serverUidOf(userId2)
     if (!target) return 'That user is not on the server yet'
+    // Optimistic badge first so the click registers instantly.
+    mutate(d => { const u = d.users.find(x => x.id === userId2); if (u) u.kyc = ok ? 'verified' : 'unverified' })
     try {
       const r = await apiPost('/v1/admin/kyc/decide', { userId: target, ok })
       applyMoneyResult(r)
@@ -1413,7 +1426,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         notify(d, userId2, ok ? 'KYC verified' : 'KYC rejected', ok ? 'Your identity is verified. All limits unlocked.' : 'Your KYC documents were not accepted. Please resubmit.', 'security')
       })
       return null
-    } catch (e: any) { return e.message }
+    } catch (e: any) { void resyncAdmin(); return e.message }
   }
   const setUserStatus: Ctx['setUserStatus'] = (userId2, status) => {
     // Persist on the server so the status survives refresh and is
@@ -1687,11 +1700,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try { const r = await apiPost('/v1/levels/request', { toLevel }); applyMoneyResult(r); return null }
     catch (e: any) { return e.message }
   }
-  const decideUpgrade: Ctx['decideUpgrade'] = (id, ok) => {
-    void (async () => {
-      try { const r = await apiPost('/v1/admin/levels/decide', { id, ok }); applyMoneyResult(r) }
-      catch (e: any) { toast({ kind: 'error', title: e.message }) }
-    })()
+  const decideUpgrade: Ctx['decideUpgrade'] = async (id, ok) => {
+    mutate(d => {
+      const r = d.levelRequests.find(x => x.id === id); if (!r) return
+      r.status = ok ? 'approved' : 'rejected'
+      if (ok) { const u = d.users.find(x => x.id === r.userId); if (u) u.level = r.toLevel }
+    })
+    try { const r = await apiPost('/v1/admin/levels/decide', { id, ok }); applyMoneyResult(r); if (ok) toast({ kind: 'success', title: 'Level upgraded' }) }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
   }
   const broadcast: Ctx['broadcast'] = async (title, body) => {
     try { await apiPost('/v1/admin/broadcast', { title, body }); return null }

@@ -1443,7 +1443,7 @@ async function handleTicketCreate(request, env, auth, body) {
   const me = await getUserRow(db, auth.uid);
   await notifyAdminsServer(db, "support", "New support chat", (me?.username || "A user") + " opened a support chat: " + subject, "/admin?tab=support", route);
   if (route === "security") {
-    await sendAndLog(env, db, { userId: auth.uid, to: "solution.home.bd@gmail.com", kind: "alert", subject: "🚨 New SECURITY support ticket — " + subject, text: "A user opened a security support chat.\n\nUser: " + (me?.username || "") + " (" + (me?.email || "") + ")\nSubject: " + subject + "\nMessage: " + message + "\n\nOpen the admin panel → Support to reply.", ip: null });
+    deferBg(sendAndLog(env, db, { userId: auth.uid, to: "solution.home.bd@gmail.com", kind: "alert", subject: "🚨 New SECURITY support ticket — " + subject, text: "A user opened a security support chat.\n\nUser: " + (me?.username || "") + " (" + (me?.email || "") + ")\nSubject: " + subject + "\nMessage: " + message + "\n\nOpen the admin panel → Support to reply.", ip: null }));
   }
   return json(request, { ok: true, ticketId: id, state: await loadState(db, auth.uid) });
 }
@@ -1564,7 +1564,7 @@ async function supportSweep(db, env) {
     const updatedAt = new Date(String(t.updated_at || "").replace(" ", "T") + "Z").getTime();
     if (lastMsg.sender === "user" && Date.now() - lastAt > 2 * 3600000 && (!t.sla_alerted_at || new Date(String(t.sla_alerted_at).replace(" ", "T") + "Z").getTime() < updatedAt)) {
       const u = await getUserRow(db, t.user_id);
-      await sendAndLog(env, db, { userId: t.user_id, to: "solution.home.bd@gmail.com", kind: "alert", subject: "⏰ Support chat waiting over 2 hours — " + t.subject, text: "A support chat has been waiting for a reply for over 2 hours.\n\nUser: " + (u?.username || "") + " (" + (u?.email || "") + ")\nSubject: " + t.subject + "\n\nOpen the admin panel → Support to reply.", ip: null });
+      deferBg(sendAndLog(env, db, { userId: t.user_id, to: "solution.home.bd@gmail.com", kind: "alert", subject: "⏰ Support chat waiting over 2 hours — " + t.subject, text: "A support chat has been waiting for a reply for over 2 hours.\n\nUser: " + (u?.username || "") + " (" + (u?.email || "") + ")\nSubject: " + t.subject + "\n\nOpen the admin panel → Support to reply.", ip: null }));
       await db.prepare("UPDATE support_tickets SET sla_alerted_at = CURRENT_TIMESTAMP WHERE id = ?").bind(t.id).run();
     }
     if (lastMsg.sender === "admin" && t.status === "processing" && Date.now() - lastAt > 24 * 3600000 && (!t.nudged_at || new Date(String(t.nudged_at).replace(" ", "T") + "Z").getTime() < updatedAt)) {
@@ -2576,6 +2576,15 @@ async function sendAndLog(env, db, { userId, to, kind, subject, text, html, ip }
 }
 // Sends a branded email to a user by id. kind "tx" respects the user's
 // transaction-email preference; other kinds always send. Never throws.
+// Post-commit side effects (notification emails) run in the background via
+// waitUntil, so API responses return as soon as the real work is committed
+// in D1 — an SMTP round-trip must never keep a loading screen up. (OTP and
+// verification-code emails still use sendAndLog directly and stay awaited:
+// there, delivery IS the operation.) _bgCtx is set per fetch; the worst
+// case of a cross-request mixup is a dropped notification email, never a
+// data problem — money and state are already committed before this runs.
+let _bgCtx = null;
+function deferBg(p) { const q = Promise.resolve(p).catch(() => {}); try { if (_bgCtx) _bgCtx.waitUntil(q); } catch { /* ignore */ } }
 async function sendUserEmail(env, db, uid, kind, subject, heading, paras, highlight) {
   try {
     const u = await db.prepare("SELECT email FROM users WHERE id = ?").bind(uid).first();
@@ -2585,7 +2594,7 @@ async function sendUserEmail(env, db, uid, kind, subject, heading, paras, highli
       if (pref && Number(pref.tx_emails) === 0) return;
     }
     const { text, html } = brandedEmail(heading, paras, highlight);
-    await sendAndLog(env, db, { userId: uid, to: u.email, kind, subject, text, html });
+    deferBg(sendAndLog(env, db, { userId: uid, to: u.email, kind, subject, text, html }));
   } catch { /* email never breaks the action */ }
 }
 // Abuse gate for the public OTP endpoints: max 5 codes/hour per email,
@@ -2943,7 +2952,8 @@ async function handlePasswordResetByOtp(request, env, body) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+    _bgCtx = ctx || null;
     const url = new URL(request.url);
     const path = url.pathname;
 

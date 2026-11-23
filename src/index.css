@@ -17,7 +17,7 @@ body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 @keyframes nw-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-7px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
 @keyframes nw-drift { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(24px,14px,0) scale(1.12); } }
-@keyframes nw-wave { 0%, 100% { transform: scaleY(0.42); } 50% { transform: scaleY(1); } }
+@keyframes nw-wave { 0%, 100% { transform: translateX(-4px) scaleX(0.82); } 50% { transform: translateX(4px) scaleX(1.22); } }
 .nw-wave-bar { transform-box: fill-box; transform-origin: 50% 50%; animation: nw-wave 1.15s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .nw-wave-bar { animation: none; } }
 .anim-fade-up { animation: fadeUp .35s ease backwards; }

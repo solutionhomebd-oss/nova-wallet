@@ -110,13 +110,13 @@ function useChatSend(tk: SupportTicket | undefined, as: 'user' | 'admin') {
   useEffect(() => {
     if (!sending || !tk) return
     if (tk.messages.some(m => m.from === as && m.pending)) return
-    const id = window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - startRef.current)))
+    const id = window.setTimeout(() => setSending(false), Math.max(0, 250 - (Date.now() - startRef.current)))
     return () => window.clearTimeout(id)
   }, [sending, tk, as])
   const send = () => {
     if (!tk || !text.trim() || sending) return
     const t0 = Date.now(); startRef.current = t0; setSending(true)
-    void replyTicket(tk.id, text, as).finally(() => window.setTimeout(() => setSending(false), Math.max(0, 800 - (Date.now() - t0))))
+    void replyTicket(tk.id, text, as).finally(() => window.setTimeout(() => setSending(false), Math.max(0, 250 - (Date.now() - t0))))
     setText('')
   }
   return { text, setText, sending, send }

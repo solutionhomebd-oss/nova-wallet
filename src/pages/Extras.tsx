@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeftRight, Award, BadgePercent, Globe, Nfc, Snowflake, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowLeftRight, Award, BadgePercent, Coins, Globe, Nfc, Snowflake, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
 import LogoMark from '../components/LogoMark'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
@@ -439,7 +439,6 @@ export function CardsPage() {
   const chipId = useId().replace(/[^a-zA-Z0-9]/g, '')
   if (!user) return null
   const joined = !!user.cardWishlistJoined
-  const addr = (user.novaAddress ?? '').replace(/(.{4})/g, '$1 ').trim()
   const notify = async () => {
     if (user.kyc !== 'verified') return toast({ kind: 'error', title: t('cards_verify_first'), body: t('cards_verify_body') })
     setBusy(true)
@@ -473,15 +472,15 @@ export function CardsPage() {
                     </svg>
                     <Nfc size={22} className="opacity-80" />
                   </div>
-                  <p className="mt-3 font-mono tracking-[0.1em] text-[11px] sm:text-[13px] whitespace-nowrap">{addr}</p>
+                  <p className="mt-3 flex justify-between font-mono text-[13px] sm:text-sm">{(user.novaAddress ?? '').match(/.{1,4}/g)?.map((g, i) => <span key={i}>{g}</span>)}</p>
                   <div className="mt-auto flex items-end justify-between gap-3">
-                    <p className="font-bold uppercase truncate text-lg">{user.name}</p>
-                    <span className="font-extrabold text-lg tracking-tight text-white drop-shadow-md shrink-0">Nova<span className="text-violet-500">Wallet</span></span>
+                    <p className="font-bold uppercase truncate text-sm">{user.name}</p>
+                    <span className="font-extrabold text-xl tracking-tight text-white drop-shadow-md shrink-0">Nova<span className="text-violet-500">Wallet</span></span>
                   </div>
                 </div>
               </div>
               <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-800 via-indigo-950 to-violet-900 text-white shadow-2xl shadow-violet-600/30">
-                <div className="h-[8.5cqw] mt-[4cqw]" />
+                <div className="h-[8.5cqw] mt-[4cqw] bg-neutral-900" />
                 <div className="px-[6cqw] pt-[3cqw]">
                   <p className="text-[2.4cqw] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
                   <div className="mt-[1.6cqw] flex items-stretch gap-[2cqw]">
@@ -507,6 +506,7 @@ export function CardsPage() {
           <p className="text-sm text-slate-500 leading-relaxed">{t('cards_soon_body')}</p>
           <ul className="space-y-3 text-sm font-semibold">
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Sparkles size={16} /></span>{t('cards_feat_issuance')}</li>
+            <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Coins size={16} /></span>{t('cards_feat_cashback')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Globe size={16} /></span>{t('cards_feat_online')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Snowflake size={16} /></span>{t('cards_feat_freeze')}</li>
             <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><BadgePercent size={16} /></span>{t('cards_feat_fee')}</li>

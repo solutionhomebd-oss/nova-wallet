@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowLeftRight, Bell, Check, CheckCheck, ChevronDown, Copy, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Wallet, X, HandCoins, Gift, ScrollText, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Bell, Check, CheckCheck, Copy, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Search, Send, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Wallet, X, HandCoins, Gift, ScrollText, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
@@ -11,7 +11,7 @@ import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
 import type { PayMethod } from '../lib/types'
 
-import { TABS, SCOPE_TABS } from '../components/AdminShell'
+import { TABS, SCOPE_TABS, AdminMenuNav } from '../components/AdminShell'
 
 export default function Admin() {
   const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
@@ -23,8 +23,6 @@ export default function Admin() {
   const [menuOpen, setMenuOpen] = useState(false)
   // Users ▸ KYC Verification submenu (sidebar/drawer) + the user a KYC
   // badge click wants highlighted once the KYC tab opens.
-  const [usersOpen, setUsersOpen] = useState(false)
-  const [systemOpen, setSystemOpen] = useState(false)
   const [kycFocus, setKycFocus] = useState<string | null>(null)
   useEffect(() => {
     if (tab !== 'kyc' || !kycFocus) return
@@ -35,13 +33,11 @@ export default function Admin() {
   const myScope = user?.adminScope ?? 'full'
   const visibleTabs = TABS.filter(t => myScope === 'full' || (SCOPE_TABS[myScope] ?? []).includes(t.id))
   // System submenu (sidebar/drawer): Audit Log, Reports & Export, System Health.
-  const systemTabs = visibleTabs.filter(t => ['audit', 'reports', 'health', 'emaillog'].includes(t.id))
-  const systemOpenEff = systemOpen || systemTabs.some(t => t.id === tab)
   useEffect(() => { if (!visibleTabs.some(t => t.id === tab)) setTab('overview') }, [tab, myScope])
   // Phase 3 UI state: feature switches, broadcast composer, global
   // search and the System Health API probe.
   const [feat, setFeat] = useState<any>(null)
-  useEffect(() => { if (tab === 'settings' && feat === null) setFeat({ deposits: true, withdrawals: true, trading: true, loans: true, registration: true, ...(db.settings.features ?? {}) }) }, [tab, feat, db.settings.features])
+  useEffect(() => { if (tab === 'features' && feat === null) setFeat({ deposits: true, withdrawals: true, trading: true, loans: true, registration: true, ...(db.settings.features ?? {}) }) }, [tab, feat, db.settings.features])
   const [bcTitle, setBcTitle] = useState(''); const [bcBody, setBcBody] = useState(''); const [bcBusy, setBcBusy] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false); const [searchQ, setSearchQ] = useState('')
   const [apiHealth, setApiHealth] = useState<any>(null)
@@ -87,7 +83,7 @@ export default function Admin() {
   useEffect(() => {
     let q: URLSearchParams
     try { q = new URLSearchParams(window.location.search) } catch { return }
-    const t = q.get('tab')
+    const t = q.get('tab') === 'content' ? 'news' : q.get('tab')
     if (t && TABS.some(x => x.id === t)) setTab(t)
     if (q.get('search')) setSearchOpen(true)
     const uidParam = q.get('user')
@@ -95,7 +91,7 @@ export default function Admin() {
     const txParam = q.get('tx')
     if (txParam) setSelTxId(txParam)
     const kycFocusParam = q.get('kycfocus')
-    if (kycFocusParam) { setKycFocus(kycFocusParam); setUsersOpen(true) }
+    if (kycFocusParam) setKycFocus(kycFocusParam)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const pendingLevels = db.levelRequests.filter(r => r.status === 'pending').length
@@ -142,7 +138,8 @@ export default function Admin() {
     const link = n.link ?? ''
     const tabM = link.match(/tab=([a-z]+)/); const userM = link.match(/user=([A-Za-z0-9-]+)/)
     const kindTab: Record<string, string> = { support: 'support', deposit: 'finance', withdraw: 'finance', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
-    const target = tabM?.[1] ?? kindTab[n.kind] ?? 'overview'
+    const rawTarget = tabM?.[1] ?? kindTab[n.kind] ?? 'overview'
+    const target = rawTarget === 'content' ? 'news' : rawTarget
     if (TABS.some(x => x.id === target)) setTab(target)
     if (userM) { const du = db.users.find(x => x.id === userM[1]); if (du) openUser(du) }
   }
@@ -220,46 +217,7 @@ export default function Admin() {
             <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 lg:hidden"><X size={15} /></button>
           </div>
           <nav className="space-y-1">
-            {visibleTabs.filter(t => t.id !== 'kyc' && !['audit', 'reports', 'health', 'emaillog'].includes(t.id)).map(t => {
-              const kycVisible = t.id === 'users' && visibleTabs.some(x => x.id === 'kyc')
-              const kycOpen = usersOpen || tab === 'kyc'
-              const badgeCls = "min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold inline-flex items-center justify-center"
-              return (
-                <div key={t.id}>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => { setTab(t.id); setMenuOpen(false) }} className={`flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${tab === t.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                      <t.icon size={18} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
-                      {(tabBadges[t.id] ?? 0) > 0 && <span className={badgeCls}>{tabBadges[t.id]}</span>}
-                      {kycVisible && !kycOpen && (tabBadges.kyc ?? 0) > 0 && <span className={badgeCls}>{tabBadges.kyc}</span>}
-                    </button>
-                    {kycVisible && (
-                      <button aria-label="Toggle KYC Verification submenu" onClick={() => setUsersOpen(o => !o)} className={`p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-transform ${kycOpen ? 'rotate-180' : ''}`}><ChevronDown size={16} /></button>
-                    )}
-                  </div>
-                  {kycVisible && kycOpen && (
-                    <button onClick={() => { setTab('kyc'); setMenuOpen(false) }} className={`w-full flex items-center gap-3 pl-11 pr-3.5 py-2.5 mt-0.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${tab === 'kyc' ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                      <ShieldCheck size={17} className="shrink-0" /> <span className="flex-1 text-left">KYC Verification</span>
-                      {(tabBadges.kyc ?? 0) > 0 && <span className={badgeCls}>{tabBadges.kyc}</span>}
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-            {systemTabs.length > 0 && (
-              <div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => setSystemOpen(o => !o)} className={`flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${systemTabs.some(t => t.id === tab) ? 'text-violet-600 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/10' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                    <Server size={18} className="shrink-0" /> <span className="flex-1 text-left">System</span>
-                  </button>
-                  <button aria-label="Toggle System submenu" onClick={() => setSystemOpen(o => !o)} className={`p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-transform ${systemOpenEff ? 'rotate-180' : ''}`}><ChevronDown size={16} /></button>
-                </div>
-                {systemOpenEff && systemTabs.map(t => (
-                  <button key={t.id} onClick={() => { setTab(t.id); setMenuOpen(false) }} className={`w-full flex items-center gap-3 pl-11 pr-3.5 py-2.5 mt-0.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${tab === t.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                    <t.icon size={17} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <AdminMenuNav tabs={visibleTabs} badges={tabBadges} active={tab} onGo={(id) => { setTab(id); setMenuOpen(false) }} />
           </nav>
           <div className="mt-auto pt-4">
             <div className="flex items-center gap-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/70 p-3">
@@ -483,8 +441,8 @@ export default function Admin() {
           </div>
         )}
 
-        {tab === 'content' && (
-          <div className="anim-fade-up space-y-6">
+        {tab === 'broadcast' && (
+          <div className="anim-fade-up">
             <Card className="p-5">
               <h3 className="font-extrabold flex items-center gap-2"><Send size={17} className="text-violet-500" /> Broadcast to all users</h3>
               <p className="text-xs text-slate-400 mt-1 mb-4">Sends a notification to every account ({db.users.length} users). It appears in their notification list on every device — use it for maintenance notices and announcements.</p>
@@ -494,6 +452,11 @@ export default function Admin() {
                 <Btn className="w-full" disabled={bcBusy} onClick={async () => { if (!bcTitle.trim() || !bcBody.trim()) return toast({ kind: 'error', title: 'Write a title and a message' }); setBcBusy(true); const e = await broadcast(bcTitle.trim(), bcBody.trim()); setBcBusy(false); if (e) return toast({ kind: 'error', title: e }); setBcTitle(''); setBcBody(''); toast({ kind: 'success', title: 'Broadcast sent', body: 'Every user will see it in their notifications.' }) }}>{bcBusy ? 'Sending…' : 'Send broadcast'}</Btn>
               </div>
             </Card>
+          </div>
+        )}
+
+        {tab === 'news' && (
+          <div className="anim-fade-up">
             <section>
               <div className="flex items-center justify-between mb-3"><h3 className="font-extrabold">News</h3><Btn onClick={() => setNewsForm({ title: '', category: 'Bitcoin', excerpt: '', body: '', source: 'Nova Market Desk', featured: false, gradient: 'from-violet-500 to-purple-700', coin: 'BTC' })}>+ Publish news</Btn></div>
               {db.news.map(n => (
@@ -504,6 +467,11 @@ export default function Admin() {
                 </Card>
               ))}
             </section>
+          </div>
+        )}
+
+        {tab === 'banners' && (
+          <div className="anim-fade-up">
             <section>
               <div className="flex items-center justify-between mb-3"><h3 className="font-extrabold flex items-center gap-2"><Megaphone size={17} /> Promotional banners</h3><Btn onClick={() => setBannerForm({ title: '', subtitle: '', gradient: 'from-violet-600 via-purple-600 to-indigo-600', active: true })}>+ Add banner</Btn></div>
               {db.banners.length === 0 && <Card><Empty title="No banners yet — add your first promotion" /></Card>}
@@ -781,7 +749,12 @@ export default function Admin() {
               <Btn className="w-full" onClick={() => { updateSettings(setForm); toast({ kind: 'success', title: 'Settings saved' }) }}>Save settings</Btn>
               <p className="text-xs text-slate-400">Payment methods supported: Bank Transfer and Crypto Deposit — the same in every region. Cryptocurrencies: 32 coins with live market data. Admin roles: Full (owner), Finance, Content, Support — enforced by the server on every request.</p>
             </Card>
-            <Card className="p-5 mt-4 space-y-3">
+          </div>
+        )}
+
+        {tab === 'features' && (
+          <div className="anim-fade-up">
+            <Card className="p-5 space-y-3">
               <h3 className="font-extrabold">Feature switches</h3>
               <p className="text-xs text-slate-400">Pause a service for maintenance — the server blocks it for everyone right away and the app shows a maintenance notice instead of the form.</p>
               {feat && ([['deposits', '💰 Deposits — Add Money'], ['withdrawals', '🏧 Withdrawals — Cash Out & Direct Withdraw'], ['trading', '📈 Trading — Buy, Sell & Swap'], ['loans', '🏦 New loan applications'], ['registration', '🆕 New account registrations']] as const).map(([k, label]) => (
@@ -790,7 +763,12 @@ export default function Admin() {
               ))}
               <Btn className="w-full" onClick={() => { if (feat) updateSettings({ features: feat }); toast({ kind: 'success', title: 'Feature switches saved' }) }}>Save feature switches</Btn>
             </Card>
-            <Card className="p-5 mt-4">
+          </div>
+        )}
+
+        {tab === 'danger' && (
+          <div className="anim-fade-up">
+            <Card className="p-5">
               <h3 className="font-extrabold text-rose-600 mb-2">Danger zone</h3>
               <Btn variant="danger" onClick={() => { resetDemo(); toast({ kind: 'info', title: 'Demo data reset to seed' }) }}>Reset demo data</Btn>
             </Card>

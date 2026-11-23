@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, ArrowLeft, ArrowLeftRight, Award, BarChart3, Bell, CheckCheck, ChevronDown, CreditCard, Gift, HandCoins, LayoutDashboard, Mail, Menu, MessageCircle, Newspaper, ScrollText, Search, Server, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, ArrowLeftRight, Award, BarChart3, Bell, CheckCheck, ChevronDown, CreditCard, Gift, HandCoins, LayoutDashboard, Mail, Megaphone, Menu, MessageCircle, Newspaper, ScrollText, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, ToggleLeft, Users, Wallet, X } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { Avatar, Badge, Empty, Modal } from './ui'
 import { fmtDateTime } from '../lib/utils'
@@ -15,24 +15,95 @@ export const TABS = [
   { id: 'referrals', label: 'Referrals', icon: Gift },
   { id: 'levels', label: 'Levels', icon: Award },
   { id: 'support', label: 'Support Chat', icon: MessageCircle },
-  { id: 'content', label: 'News & Banners', icon: Newspaper },
+  { id: 'broadcast', label: 'Broadcast', icon: Send },
+  { id: 'news', label: 'News', icon: Newspaper },
+  { id: 'banners', label: 'Banners', icon: Megaphone },
   { id: 'audit', label: 'Audit Log', icon: ScrollText },
   { id: 'reports', label: 'Reports & Export', icon: BarChart3 },
   { id: 'health', label: 'System Health', icon: Activity },
   { id: 'emaillog', label: 'Email Log', icon: Mail },
   { id: 'payments', label: 'Payment Methods', icon: CreditCard },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
+  { id: 'settings', label: 'Platform Settings', icon: SettingsIcon },
+  { id: 'features', label: 'Feature Switches', icon: ToggleLeft },
+  { id: 'danger', label: 'Danger Zone', icon: AlertTriangle },
 ] as const
+
+/** Sidebar grouping (owner's reorganization, 2026-11-23): related tabs live
+ * under one expandable group header; the rest stay single rows. MENU_ORDER
+ * interleaves singles and groups ('g-' prefix = group). Tab ids themselves
+ * are unchanged, so scopes, badges and deep links keep working. */
+export const MENU_GROUPS = [
+  { id: 'g-finance', label: 'Finance', icon: Wallet, children: ['finance', 'txs'] },
+  { id: 'g-users', label: 'Users', icon: Users, children: ['users', 'kyc', 'levels'] },
+  { id: 'g-content', label: 'Content', icon: Newspaper, children: ['broadcast', 'news', 'banners'] },
+  { id: 'g-settings', label: 'Settings', icon: SettingsIcon, children: ['settings', 'features', 'payments', 'danger'] },
+  { id: 'g-system', label: 'System', icon: Server, children: ['audit', 'reports', 'health', 'emaillog'] },
+] as const
+export const MENU_ORDER = ['overview', 'g-finance', 'g-users', 'loans', 'referrals', 'support', 'g-content', 'g-settings', 'g-system'] as const
+
+type MenuTab = { id: string; label: string; icon: any }
+
+/** The grouped sidebar menu, shared by the Admin panel page and the
+ * standalone AdminShell pages so the two never drift apart. A group opens
+ * automatically when it contains the active tab; its header shows the
+ * summed pending badge while collapsed. */
+export function AdminMenuNav({ tabs, badges, active, onGo }: { tabs: readonly MenuTab[]; badges: Record<string, number>; active: string; onGo: (id: string) => void }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const byId = new Map(tabs.map(t => [t.id, t]))
+  const badgeCls = "min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold inline-flex items-center justify-center"
+  const rowCls = (isActive: boolean) => `flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${isActive ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`
+  const childCls = (isActive: boolean) => `w-full flex items-center gap-3 pl-11 pr-3.5 py-2.5 mt-0.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${isActive ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`
+  return (
+    <>
+      {MENU_ORDER.map(key => {
+        if (!key.startsWith('g-')) {
+          const t = byId.get(key)
+          if (!t) return null
+          return (
+            <div key={key} className="flex items-center gap-1">
+              <button onClick={() => onGo(t.id)} className={rowCls(active === t.id)}>
+                <t.icon size={18} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
+                {(badges[t.id] ?? 0) > 0 && <span className={badgeCls}>{badges[t.id]}</span>}
+              </button>
+            </div>
+          )
+        }
+        const g = MENU_GROUPS.find(x => x.id === key)
+        if (!g) return null
+        const kids = g.children.map(id => byId.get(id)).filter((t): t is MenuTab => !!t)
+        if (kids.length === 0) return null
+        const containsActive = kids.some(t => t.id === active)
+        const isOpen = open[g.id] ?? containsActive
+        const groupBadge = kids.reduce((s, t) => s + (badges[t.id] ?? 0), 0)
+        return (
+          <div key={g.id}>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setOpen(o => ({ ...o, [g.id]: !isOpen }))} className={`flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${containsActive || isOpen ? 'text-violet-600 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/10' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
+                <g.icon size={18} className="shrink-0" /> <span className="flex-1 text-left">{g.label}</span>
+                {!isOpen && groupBadge > 0 && <span className={badgeCls}>{groupBadge}</span>}
+              </button>
+              <button aria-label={`Toggle ${g.label} submenu`} onClick={() => setOpen(o => ({ ...o, [g.id]: !isOpen }))} className={`p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-transform ${isOpen ? 'rotate-180' : ''}`}><ChevronDown size={16} /></button>
+            </div>
+            {isOpen && kids.map(t => (
+              <button key={t.id} onClick={() => onGo(t.id)} className={childCls(active === t.id)}>
+                <t.icon size={17} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
+                {(badges[t.id] ?? 0) > 0 && <span className={badgeCls}>{badges[t.id]}</span>}
+              </button>
+            ))}
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 /** Which tabs each admin scope may see. 'full' (the owner) sees all.
  * The Worker enforces the same boundaries on the API itself. */
 export const SCOPE_TABS: Record<string, string[]> = {
   finance: ['overview', 'finance', 'txs', 'users', 'loans', 'referrals', 'levels', 'reports', 'audit'],
-  content: ['overview', 'users', 'support', 'content', 'audit'],
+  content: ['overview', 'users', 'support', 'broadcast', 'news', 'banners', 'audit'],
   support: ['overview', 'users', 'kyc', 'support'],
 }
-
-const SYSTEM_IDS = ['audit', 'reports', 'health', 'emaillog']
 
 /** The admin panel's own chrome — top bar + sidebar/drawer — for standalone
  * admin pages (e.g. the full-page support chat) that live OUTSIDE the /admin
@@ -45,14 +116,11 @@ export default function AdminShell() {
   const { pathname } = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
-  const [usersOpen, setUsersOpen] = useState(false)
-  const [systemOpen, setSystemOpen] = useState(false)
   if (!user) return null
   // The standalone page this shell wraps decides which tab reads as active.
   const tab: string = pathname.startsWith('/admin/support') ? 'support' : pathname.startsWith('/admin/users') ? 'users' : ''
   const myScope = user.adminScope ?? 'full'
   const visibleTabs = TABS.filter(t => myScope === 'full' || (SCOPE_TABS[myScope] ?? []).includes(t.id))
-  const systemTabs = visibleTabs.filter(t => SYSTEM_IDS.includes(t.id))
   const tabBadges: Record<string, number> = {
     finance: db.deposits.filter(d => d.status === 'pending').length + db.withdrawals.filter(d => d.status === 'pending').length,
     kyc: db.users.filter(u => u.kyc === 'pending').length,
@@ -72,8 +140,6 @@ export default function AdminShell() {
     const kindTab: Record<string, string> = { support: 'support', deposit: 'finance', withdraw: 'finance', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
     navigate('/admin?tab=' + (kindTab[n.kind] ?? 'overview'))
   }
-  const badgeCls = "min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold inline-flex items-center justify-center"
-  const itemCls = (active: boolean) => `flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${active ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <header className="sticky top-0 z-30 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-800">
@@ -111,45 +177,7 @@ export default function AdminShell() {
             <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 lg:hidden"><X size={15} /></button>
           </div>
           <nav className="space-y-1">
-            {visibleTabs.filter(t => t.id !== 'kyc' && !SYSTEM_IDS.includes(t.id)).map(t => {
-              const kycVisible = t.id === 'users' && visibleTabs.some(x => x.id === 'kyc')
-              const kycOpen = usersOpen || tab === 'kyc'
-              return (
-                <div key={t.id}>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => goTab(t.id)} className={itemCls(tab === t.id)}>
-                      <t.icon size={18} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
-                      {(tabBadges[t.id] ?? 0) > 0 && <span className={badgeCls}>{tabBadges[t.id]}</span>}
-                      {kycVisible && !kycOpen && (tabBadges.kyc ?? 0) > 0 && <span className={badgeCls}>{tabBadges.kyc}</span>}
-                    </button>
-                    {kycVisible && (
-                      <button aria-label="Toggle KYC Verification submenu" onClick={() => setUsersOpen(o => !o)} className={`p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-transform ${kycOpen ? 'rotate-180' : ''}`}><ChevronDown size={16} /></button>
-                    )}
-                  </div>
-                  {kycVisible && kycOpen && (
-                    <button onClick={() => goTab('kyc')} className={`w-full flex items-center gap-3 pl-11 pr-3.5 py-2.5 mt-0.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${tab === 'kyc' ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                      <ShieldCheck size={17} className="shrink-0" /> <span className="flex-1 text-left">KYC Verification</span>
-                      {(tabBadges.kyc ?? 0) > 0 && <span className={badgeCls}>{tabBadges.kyc}</span>}
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-            {systemTabs.length > 0 && (
-              <div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => setSystemOpen(o => !o)} className={`flex-1 flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${systemOpen ? 'text-violet-600 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/10' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                    <Server size={18} className="shrink-0" /> <span className="flex-1 text-left">System</span>
-                  </button>
-                  <button aria-label="Toggle System submenu" onClick={() => setSystemOpen(o => !o)} className={`p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-transform ${systemOpen ? 'rotate-180' : ''}`}><ChevronDown size={16} /></button>
-                </div>
-                {systemOpen && systemTabs.map(t => (
-                  <button key={t.id} onClick={() => goTab(t.id)} className={`w-full flex items-center gap-3 pl-11 pr-3.5 py-2.5 mt-0.5 rounded-2xl text-sm font-bold transition active:scale-[0.98] ${tab === t.id ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/25' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100'}`}>
-                    <t.icon size={17} className="shrink-0" /> <span className="flex-1 text-left">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <AdminMenuNav tabs={visibleTabs} badges={tabBadges} active={tab} onGo={goTab} />
           </nav>
           <div className="mt-auto pt-4">
             <div className="flex items-center gap-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/70 p-3">

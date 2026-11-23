@@ -54,7 +54,12 @@ export default function LogoMark({ size = 34, className = '' }: { size?: number;
         <rect x="87.7" y="10.2" width="2.2" height="79.4" rx="1.1" />
         </clipPath>
       </defs>
-      <rect x="0" y="0" width="100" height="100" rx="22" fill={`url(#${tile})`} />
+      {/* Theme-aware tile: pure white in light mode so the mark sits cleanly
+          on light headers / the pastel lock screen; the original dark navy
+          tile in dark mode. (Owner, 2026-11-23: the dark tile clashed with
+          the light theme.) */}
+      <rect x="0" y="0" width="100" height="100" rx="22" fill="#ffffff" className="dark:hidden" />
+      <rect x="0" y="0" width="100" height="100" rx="22" fill={`url(#${tile})`} className="hidden dark:block" />
       <g fill={`url(#${bars})`}>
         <rect x="10.0" y="10.2" width="2.2" height="79.4" rx="1.1" />
         <rect x="13.5" y="10.4" width="2.2" height="79.2" rx="1.1" />

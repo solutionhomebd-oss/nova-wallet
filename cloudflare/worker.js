@@ -886,6 +886,7 @@ async function handleWithdraw(request, env, auth, body) {
 }
 
 async function handleDirectWithdraw(request, env, auth, body) {
+  const db = env.DB;
   if (await featureOff(db, "withdrawals")) return json(request, { error: "Withdrawals are temporarily unavailable. Please try again later." }, 403);
   const { method, amount, destination } = body;
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);

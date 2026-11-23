@@ -229,6 +229,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // cannot double-tap), and a second action call is refused outright.
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
   const busyRef = useRef(false)
+  // Statuses an admin just decided locally (approve/reject/…), kept for 60s
+  // so a stale overview/hydration can't flip the row back to 'pending'
+  // before the server's own response lands. See applyOverviewInto.
+  const recentDecisionsRef = useRef(new Map<string, { status: string; at: number }>())
+  const noteDecision = (id: string, status: string) => { recentDecisionsRef.current.set(id, { status, at: Date.now() }) }
   const withBusy = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
     busyRef.current = true; setBusyLabel(label)
     try { return await fn() } finally { busyRef.current = false; setBusyLabel(null) }
@@ -591,6 +596,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     if (ov.levelRequests) d.levelRequests = fix(mapRows(ov.levelRequests))
     if (ov.errors) setAdminErrors(ov.errors)
+    // Optimistic admin decisions must not be flipped back by a stale
+    // overview fetched before the decision landed: for 60s a locally
+    // decided status wins over an incoming 'pending'; once the server
+    // confirms a decided status, the record is dropped.
+    const reconcileDecisions = (rows: any[]) => rows.map(r => {
+      const rec = recentDecisionsRef.current.get(r.id)
+      if (!rec) return r
+      if (Date.now() - rec.at > 60000) { recentDecisionsRef.current.delete(r.id); return r }
+      if (r.status === 'pending') return { ...r, status: rec.status }
+      recentDecisionsRef.current.delete(r.id)
+      return r
+    })
+    d.deposits = reconcileDecisions(d.deposits); d.withdrawals = reconcileDecisions(d.withdrawals)
+    d.loans = reconcileDecisions(d.loans); d.levelRequests = reconcileDecisions(d.levelRequests)
+    for (const u of d.users) {
+      const key = 'kyc:' + u.id
+      const rec = recentDecisionsRef.current.get(key)
+      if (!rec) continue
+      if (Date.now() - rec.at > 60000) { recentDecisionsRef.current.delete(key); continue }
+      if (u.kyc !== rec.status) u.kyc = rec.status as User['kyc']
+      else recentDecisionsRef.current.delete(key)
+    }
     canonicalizeSelf(d, userIdRef.current)
   }
   const applyMoneyResult = (r: any) => {
@@ -1127,13 +1154,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Optimistic: the row updates the instant the admin clicks; the server
     // response then confirms it (or a resync snaps it back on failure).
     mutate(d => { const dep = d.deposits.find(x => x.id === id); if (dep) dep.status = ok ? 'approved' : 'rejected' })
+    noteDecision(id, ok ? 'approved' : 'rejected')
     try { const r = await apiPost('/v1/admin/decide-deposit', { id, ok }); applyMoneyResult(r); toast({ kind: ok ? 'success' : 'info', title: ok ? 'Deposit approved & credited' : 'Deposit rejected' }) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); recentDecisionsRef.current.delete(id); void resyncAdmin() }
   }
   const settleDepositExternal: Ctx['settleDepositExternal'] = async (id, ok) => {
     mutate(d => { const dep = d.deposits.find(x => x.id === id); if (dep) dep.status = ok ? 'approved' : 'rejected' })
+    noteDecision(id, ok ? 'approved' : 'rejected')
     try { const r = await apiPost('/v1/admin/decide-deposit', { id, ok }); applyMoneyResult(r) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); recentDecisionsRef.current.delete(id); void resyncAdmin() }
   }
   const requestWithdraw: Ctx['requestWithdraw'] = async (p) => {
     if (!user) return 'Not signed in'
@@ -1196,8 +1225,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   const decideWithdraw: Ctx['decideWithdraw'] = async (id, ok) => {
     mutate(d => { const wd = d.withdrawals.find(x => x.id === id); if (wd) wd.status = ok ? 'completed' : 'rejected' })
+    noteDecision(id, ok ? 'completed' : 'rejected')
     try { const r = await apiPost('/v1/admin/decide-withdraw', { id, ok }); applyMoneyResult(r); toast({ kind: ok ? 'success' : 'info', title: ok ? 'Withdrawal completed' : 'Withdrawal rejected & refunded' }) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); recentDecisionsRef.current.delete(id); void resyncAdmin() }
   }
   const verifyTxPin: Ctx['verifyTxPin'] = (pin) => {
     if (!user) return 'Not signed in'
@@ -1379,8 +1409,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   const decideLoan: Ctx['decideLoan'] = async (id, ok) => {
     mutate(d => { const ln = d.loans.find(x => x.id === id); if (ln) ln.status = ok ? 'active' : 'rejected' })
+    noteDecision(id, ok ? 'active' : 'rejected')
     try { const r = await apiPost('/v1/admin/decide-loan', { id, ok }); applyMoneyResult(r); if (ok) toast({ kind: 'success', title: 'Loan approved & disbursed' }) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); recentDecisionsRef.current.delete(id); void resyncAdmin() }
   }
   const repayLoan: Ctx['repayLoan'] = async (loan, amount) => {
     if (!user) return 'Not signed in'
@@ -1416,6 +1447,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!target) return 'That user is not on the server yet'
     // Optimistic badge first so the click registers instantly.
     mutate(d => { const u = d.users.find(x => x.id === userId2); if (u) u.kyc = ok ? 'verified' : 'unverified' })
+    noteDecision('kyc:' + userId2, ok ? 'verified' : 'unverified')
     try {
       const r = await apiPost('/v1/admin/kyc/decide', { userId: target, ok })
       applyMoneyResult(r)
@@ -1426,7 +1458,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         notify(d, userId2, ok ? 'KYC verified' : 'KYC rejected', ok ? 'Your identity is verified. All limits unlocked.' : 'Your KYC documents were not accepted. Please resubmit.', 'security')
       })
       return null
-    } catch (e: any) { void resyncAdmin(); return e.message }
+    } catch (e: any) { recentDecisionsRef.current.delete('kyc:' + userId2); void resyncAdmin(); return e.message }
   }
   const setUserStatus: Ctx['setUserStatus'] = (userId2, status) => {
     // Persist on the server so the status survives refresh and is
@@ -1706,8 +1738,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       r.status = ok ? 'approved' : 'rejected'
       if (ok) { const u = d.users.find(x => x.id === r.userId); if (u) u.level = r.toLevel }
     })
+    noteDecision(id, ok ? 'approved' : 'rejected')
     try { const r = await apiPost('/v1/admin/levels/decide', { id, ok }); applyMoneyResult(r); if (ok) toast({ kind: 'success', title: 'Level upgraded' }) }
-    catch (e: any) { toast({ kind: 'error', title: e.message }); void resyncAdmin() }
+    catch (e: any) { toast({ kind: 'error', title: e.message }); recentDecisionsRef.current.delete(id); void resyncAdmin() }
   }
   const broadcast: Ctx['broadcast'] = async (title, body) => {
     try { await apiPost('/v1/admin/broadcast', { title, body }); return null }

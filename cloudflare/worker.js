@@ -480,7 +480,7 @@ async function loadDirectory(db, includePhone = false) {
   }));
 }
 
-async function loadOverview(db) {
+async function loadOverview(db, lite = false) {
   const users = await loadDirectory(db, true);
   const wallets = {}, transactions = [], deposits = [], withdrawals = [], loans = [], stakes = [];
   for (const u of users) {
@@ -495,17 +495,23 @@ async function loadOverview(db) {
   }
   const byDate = (a, b) => (a.createdAt < b.createdAt ? 1 : -1);
   transactions.sort(byDate); deposits.sort(byDate); withdrawals.sort(byDate); loans.sort(byDate); stakes.sort(byDate);
-  const errRows = await db.prepare("SELECT * FROM client_errors ORDER BY created_at DESC LIMIT 50").all();
-  const auditRows = await db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100").all();
-  const emailRows = await db.prepare("SELECT * FROM email_log ORDER BY created_at DESC LIMIT 50").all();
+  // Lite mode (action responses — approve/reject, adjust, trade, tx actions):
+  // the panel only needs the money/user slices refreshed, so the heavy
+  // extras (all ticket threads, content, crash list, email bodies) are left
+  // out and transactions/audit are capped. The full GET overview keeps
+  // everything. Absent keys are dropped by JSON and the client applies
+  // overview slices only when present.
+  const errRows = lite ? { results: [] } : await db.prepare("SELECT * FROM client_errors ORDER BY created_at DESC LIMIT 50").all();
+  const auditRows = await db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT " + (lite ? 30 : 100)).all();
+  const emailRows = lite ? { results: [] } : await db.prepare("SELECT * FROM email_log ORDER BY id DESC LIMIT 50").all();
   return {
-    users, wallets, transactions, deposits, withdrawals, loans, stakes,
-    tickets: await loadTickets(db, null, "admin"),
+    users, wallets, transactions: lite ? transactions.slice(0, 200) : transactions, deposits, withdrawals, loans, stakes,
+    tickets: lite ? undefined : await loadTickets(db, null, "admin"),
     levelRequests: await loadLevelRequests(db, null),
-    content: await loadContent(db),
-    errors: errRows.results.map((e) => ({ id: e.id, userId: e.user_id, message: e.message, url: e.url, createdAt: isoOf(e.created_at) })),
+    content: lite ? undefined : await loadContent(db),
+    errors: lite ? undefined : errRows.results.map((e) => ({ id: e.id, userId: e.user_id, message: e.message, url: e.url, createdAt: isoOf(e.created_at) })),
     audit: auditRows.results.map((a) => ({ id: String(a.id), actor: a.actor, action: a.action, detail: a.detail, createdAt: isoOf(a.created_at) })),
-    emailLog: emailRows.results.map((e) => ({ id: e.id, to: e.to_email, kind: e.kind, subject: e.subject, status: e.status, error: e.error || undefined, createdAt: new Date(Number(e.created_at)).toISOString() })),
+    emailLog: lite ? undefined : emailRows.results.map((e) => ({ id: e.id, to: e.to_email, kind: e.kind, subject: e.subject, status: e.status, error: e.error || undefined, createdAt: new Date(Number(e.created_at)).toISOString() })),
     cannedReplies: (await getSettingKey(db, "canned_replies", null)) || DEFAULT_CANNED,
   };
 }
@@ -933,7 +939,7 @@ async function handleTrade(request, env, auth, body, side) {
   }
   if (r.error) return json(request, { error: r.error }, 400);
   try { await db.batch(r.stmts); } catch (e) { return json(request, { error: "Trade failed: " + String(e?.message || e) }, 500); }
-  if (target !== auth.uid) return json(request, { ok: true, overview: await loadOverview(db) });
+  if (target !== auth.uid) return json(request, { ok: true, overview: await loadOverview(db, true) });
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
 
@@ -1093,7 +1099,7 @@ async function handleLoanFee(request, env, auth, body) {
   if (action === "set") {
     if (auth.role !== "admin") return json(request, { error: "Admin only." }, 403);
     await db.prepare("UPDATE loans SET processing_fee = ?, fee_status = 'unpaid' WHERE id = ?").bind(body.amount, loanId).run();
-    return json(request, { ok: true, overview: await loadOverview(db) });
+    return json(request, { ok: true, overview: await loadOverview(db, true) });
   }
   if (action === "submit") {
     if (loan.user_id !== auth.uid) return json(request, { error: "Not your loan." }, 403);
@@ -1103,7 +1109,7 @@ async function handleLoanFee(request, env, auth, body) {
   if (action === "confirm") {
     if (auth.role !== "admin") return json(request, { error: "Admin only." }, 403);
     await db.prepare("UPDATE loans SET fee_status = 'paid' WHERE id = ?").bind(loanId).run();
-    return json(request, { ok: true, overview: await loadOverview(db) });
+    return json(request, { ok: true, overview: await loadOverview(db, true) });
   }
   return json(request, { error: "Unknown fee action." }, 400);
 }
@@ -1802,7 +1808,7 @@ async function handleAdminSetStatus(request, env, auth, body) {
     status === "frozen" ? "Your wallet has been frozen by an admin. You cannot send, withdraw or trade until it is unfrozen. Contact support if this is unexpected."
       : status === "suspended" ? "Your account has been suspended by an admin. All transactions are blocked. Contact support for help."
       : "Your account is active again. All features are available.", null);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminSetLevel(request, env, auth, body) {
@@ -1818,7 +1824,7 @@ async function handleAdminSetLevel(request, env, auth, body) {
   await auditLog(db, auth, "level.set", target + " → Level " + level);
   await notifyServer(db, target, "security", "Account level changed", "An admin set your account to Level " + level + ".", null);
   await sendUserEmail(env, db, target, "account", level > prevLevel ? "Your NovaWallet level was upgraded — you are now Level " + level + " 🎉" : "Your NovaWallet level was updated to Level " + level, level > prevLevel ? "Level upgraded" : "Level updated", ["Your account level was changed from Level " + prevLevel + " to Level " + level + " by our team.", level > prevLevel ? "Your new limits and benefits are active right away." : "If you have questions about this change, reply to this email or open a support chat."], "Level " + level);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminLevelDef(request, env, auth, body) {
@@ -1852,7 +1858,7 @@ async function handleAdminLevelDecide(request, env, auth, body) {
   await notifyServer(db, row.user_id, "security", ok ? "🎉 Level upgraded" : "Upgrade request rejected",
     ok ? "Your account is now Level " + row.to_level + ". Higher limits are active." : "Your upgrade request was not approved. Check the level requirements and try again.", null);
   await sendUserEmail(env, db, row.user_id, "account", ok ? "Your NovaWallet level was upgraded — you are now Level " + row.to_level + " 🎉" : "Your NovaWallet level upgrade request was not approved", ok ? "Level upgraded" : "Upgrade request update", [ok ? "Great news — your upgrade request was approved and your account is now Level " + row.to_level + ". Your higher limits and benefits are active right away." : "Your request to upgrade to Level " + row.to_level + " was not approved this time. Please check the level requirements in the app and try again when you meet them."], ok ? "Level " + row.to_level : undefined);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminNewsSave(request, env, auth, body) {
@@ -1983,7 +1989,7 @@ async function handleAdminSetScope(request, env, auth, body) {
   if (!row || row.role !== "admin") return json(request, { error: "Target is not an admin." }, 400);
   await db.prepare("UPDATE users SET admin_scope = ? WHERE id = ?").bind(scope === "full" ? null : scope, target).run();
   await auditLog(db, auth, "admin.scope", target + " → " + scope);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminSetRole(request, env, auth, body) {
@@ -1997,7 +2003,7 @@ async function handleAdminSetRole(request, env, auth, body) {
   await db.prepare("UPDATE users SET role = ?, admin_scope = ? WHERE id = ?")
     .bind(role, role === "admin" ? (row.admin_scope || "support") : null, target).run();
   await auditLog(db, auth, "admin.role", target + " → " + role);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminBackup(request, env, auth) {
@@ -2062,13 +2068,13 @@ async function handleAdminKycDecide(request, env, auth, body) {
       .bind(pubId("KYC"), target, auth.uid).run();
     await notifyServer(db, target, "security", "✅ Verified by NovaWallet", "Your identity was verified by the NovaWallet team. All limits and features are unlocked.", null);
   await sendUserEmail(env, db, target, "account", "Your NovaWallet identity is verified", "Identity verified", ["Your identity was verified by the NovaWallet team. All limits and features are now unlocked."]);
-    return json(request, { ok: true, overview: await loadOverview(db) });
+    return json(request, { ok: true, overview: await loadOverview(db, true) });
   }
   await db.prepare("UPDATE kyc_submissions SET status = ?, reviewed_by = ? WHERE id = ?")
     .bind(body.ok ? "verified" : "unverified", auth.uid, row.id).run();
   await notifyServer(db, target, "security", body.ok ? "✅ KYC verified" : "KYC not approved", body.ok ? "Your identity is verified. All limits and features are unlocked." : "Your KYC submission was not approved. Please check your documents and submit again.", null);
   await sendUserEmail(env, db, target, "account", body.ok ? "Your NovaWallet identity is verified" : "KYC not approved — action needed", body.ok ? "Identity verified" : "KYC not approved", [body.ok ? "Your identity verification is complete. All limits and features are now unlocked." : "Your KYC submission was not approved. Please check your documents and submit again from the app."]);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 // ---- Admin endpoints ----------------------------------------------------------
@@ -2129,7 +2135,7 @@ async function handleDecideDeposit(request, env, auth, body) {
   if (bonusGranted > 0) await auditLog(db, auth, "deposit.bonus", dep.id + " · first deposit · bonus +" + bonusGranted);
   await notifyServer(db, dep.user_id, "deposit", ok ? "Deposit approved" : "Deposit rejected", ok ? "Your deposit of " + dep.amount + " was approved and credited." + (bonusGranted > 0 ? " 🎁 First-deposit bonus: +" + bonusGranted + " credited — you received double!" : "") : "Your deposit of " + dep.amount + " was rejected. Please check the details and try again.", null);
   await sendUserEmail(env, db, dep.user_id, "tx", ok ? "Deposit approved — " + fmtTk(dep.amount) + " credited" : "Deposit not approved", ok ? "Deposit approved" : "Deposit not approved", [ok ? "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " has been approved and credited to your wallet." + (bonusGranted > 0 ? " You also received a first-deposit bonus of " + fmtTk(bonusGranted) + "." : "") : "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " was not approved, so nothing was credited. Please check the details and try again, or contact support."], ok ? fmtTk(Number(dep.amount) + bonusGranted) + " credited" : undefined);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleDecideWithdraw(request, env, auth, body) {
@@ -2147,7 +2153,7 @@ async function handleDecideWithdraw(request, env, auth, body) {
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
   await notifyServer(db, wd.user_id, "withdraw", ok ? "Cash out completed" : "Cash out rejected", ok ? "Your cash out of " + wd.amount + " has been sent." : "Your cash out of " + wd.amount + " was rejected and the amount returned to your balance.", null);
   await sendUserEmail(env, db, wd.user_id, "tx", ok ? "Cash out completed — " + fmtTk(wd.amount) : "Cash out not approved", ok ? "Cash out completed" : "Cash out not approved", [ok ? "Your cash out of " + fmtTk(wd.amount) + " to " + wd.destination + " has been completed." : "Your cash out of " + fmtTk(wd.amount) + " was not approved. The full amount has been returned to your wallet balance."]);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleDecideLoan(request, env, auth, body) {
@@ -2166,7 +2172,7 @@ async function handleDecideLoan(request, env, auth, body) {
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
   await notifyServer(db, loan.user_id, "loan", ok ? "Loan approved" : "Loan rejected", ok ? "Your loan of " + loan.principal + " was approved and credited to your wallet." : "Your loan application of " + loan.principal + " was not approved.", null);
   await sendUserEmail(env, db, loan.user_id, "tx", ok ? "Loan approved — " + fmtTk(loan.principal) + " disbursed" : "Loan application not approved", ok ? "Loan approved" : "Loan application update", [ok ? "Your loan of " + fmtTk(loan.principal) + " has been approved and credited to your wallet. Your monthly payment is " + fmtTk(loan.emi) + " over " + loan.months + " months." : "Your loan application of " + fmtTk(loan.principal) + " was not approved this time. You can apply again from the app."]);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminAdjust(request, env, auth, body) {
@@ -2185,7 +2191,7 @@ async function handleAdminAdjust(request, env, auth, body) {
   } catch (e) {
     return json(request, { error: "Adjustment failed: " + String(e?.message || e) }, 500);
   }
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 // ---- Transaction hold / unhold / cancel (admin ecosystem) -------------------
@@ -2244,7 +2250,7 @@ async function handleAdminTxHold(request, env, auth, body) {
   await auditLog(db, auth, "tx.hold", tx.public_id + " · " + tx.title + " · " + amt + " " + tx.currency + (pair ? " · funds held at recipient · pair " + pair.public_id : ""));
   await notifyServer(db, target.user_id, "tx", "\u{1F512} Transaction held", "Your transaction \"" + target.title + "\" (" + target.public_id + ") has been placed on hold. The amount is locked and cannot be spent until it is released.", "/transactions?tx=" + target.public_id);
   if (pair && tx.user_id !== target.user_id) await notifyServer(db, tx.user_id, "tx", "\u{1F512} Transfer held", "The transfer \"" + tx.title + "\" (" + tx.public_id + ") has been placed on hold — the amount is locked in the recipient's account until it is released.", "/transactions?tx=" + tx.public_id);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminTxUnhold(request, env, auth, body) {
@@ -2272,7 +2278,7 @@ async function handleAdminTxUnhold(request, env, auth, body) {
   await auditLog(db, auth, "tx.unhold", tx.public_id + " · " + tx.title + " · " + amt + " " + tx.currency + (pair ? " · pair " + pair.public_id : ""));
   await notifyServer(db, fundsTx.user_id, "tx", "\u{1F513} Hold released", "The hold on your transaction \"" + fundsTx.title + "\" (" + fundsTx.public_id + ") has been released. The amount is available again.", "/transactions?tx=" + fundsTx.public_id);
   if (pair && tx.user_id !== fundsTx.user_id) await notifyServer(db, tx.user_id, "tx", "\u{1F513} Hold released", "The hold on the transfer \"" + tx.title + "\" (" + tx.public_id + ") has been released.", "/transactions?tx=" + tx.public_id);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminTxCancel(request, env, auth, body) {
@@ -2340,7 +2346,7 @@ async function handleAdminTxCancel(request, env, auth, body) {
   await auditLog(db, auth, "tx.cancel", tx.public_id + " · " + tx.title + " · " + amt + " " + tx.currency + (pair ? " · pair " + pair.public_id : ""));
   await notifyServer(db, tx.user_id, "tx", "\u21A9\uFE0F Transaction cancelled", "Your transaction \"" + tx.title + "\" (" + tx.public_id + ") was cancelled by the NovaWallet team and its amount has been reversed.", "/transactions?tx=" + tx.public_id);
   if (pair) await notifyServer(db, pair.user_id, "tx", "\u21A9\uFE0F Transaction cancelled", "A transaction involving you (" + pair.public_id + ") was cancelled by the NovaWallet team and its amount has been reversed.", "/transactions?tx=" + pair.public_id);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminReleaseStake(request, env, auth, body) {
@@ -2349,7 +2355,7 @@ async function handleAdminReleaseStake(request, env, auth, body) {
   const r = await unstakeCore(db, body.userId, body.stakeId, true);
   if (r.error) return json(request, { error: r.error }, 400);
   try { await db.batch(r.stmts); } catch (e) { return json(request, { error: "Release failed: " + String(e?.message || e) }, 500); }
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminClearLocked(request, env, auth, body) {
@@ -2395,7 +2401,7 @@ async function handleAdminClearLocked(request, env, auth, body) {
     stmts.push(adjStmt(db, wallet.id, "BDT", locked + interestTotal, -locked));
   }
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Clear locked failed: " + String(e?.message || e) }, 500); }
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 // ---- Router -------------------------------------------------------------------
@@ -2766,7 +2772,7 @@ async function handleAdminResetPin(request, env, auth, body) {
   await auditLog(db, auth, "user.pin_reset", (user.username || target) + " — transaction PIN reset by admin");
   await notifyServer(db, target, "security", "Transaction PIN reset", "An admin has reset your transaction PIN. Use the new PIN you received from our support team for your next transaction. If you did not request this, contact support immediately.", null);
   await sendUserEmail(env, db, target, "security", "Your NovaWallet transaction PIN was reset", "Transaction PIN reset", ["Your transaction PIN was reset by the NovaWallet team — for example, because you asked support for help after forgetting it.", "Use the new PIN you received from our support team for your next transaction.", "If you did not request this, contact support immediately at support@novawallet.pp.ua."]);
-  return json(request, { ok: true, overview: await loadOverview(db) });
+  return json(request, { ok: true, overview: await loadOverview(db, true) });
 }
 
 async function handleAdminTestEmail(request, env, auth) {

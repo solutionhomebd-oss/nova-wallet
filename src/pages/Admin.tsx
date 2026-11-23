@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Activity, ArrowLeft, ArrowLeftRight, BarChart3, Bell, Check, CheckCheck, ChevronDown, Copy, CreditCard, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Newspaper, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Users, Wallet, X, HandCoins, Gift, ScrollText, Award, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Bell, Check, CheckCheck, ChevronDown, Copy, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Search, Send, Server, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Wallet, X, HandCoins, Gift, ScrollText, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
@@ -10,32 +10,7 @@ import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
 import type { PayMethod } from '../lib/types'
 
-const TABS = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'finance', label: 'Deposits & Withdrawals', icon: Wallet },
-  { id: 'txs', label: 'Transactions', icon: ArrowLeftRight },
-  { id: 'users', label: 'Users', icon: Users },
-  { id: 'kyc', label: 'KYC Verification', icon: ShieldCheck },
-  { id: 'loans', label: 'Loans', icon: HandCoins },
-  { id: 'referrals', label: 'Referrals', icon: Gift },
-  { id: 'levels', label: 'Levels', icon: Award },
-  { id: 'support', label: 'Support Chat', icon: MessageCircle },
-  { id: 'content', label: 'News & Banners', icon: Newspaper },
-  { id: 'audit', label: 'Audit Log', icon: ScrollText },
-  { id: 'reports', label: 'Reports & Export', icon: BarChart3 },
-  { id: 'health', label: 'System Health', icon: Activity },
-  { id: 'emaillog', label: 'Email Log', icon: Mail },
-  { id: 'payments', label: 'Payment Methods', icon: CreditCard },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
-] as const
-
-/** Which tabs each admin scope may see. 'full' (the owner) sees all.
- * The Worker enforces the same boundaries on the API itself. */
-const SCOPE_TABS: Record<string, string[]> = {
-  finance: ['overview', 'finance', 'txs', 'users', 'loans', 'referrals', 'levels', 'reports', 'audit'],
-  content: ['overview', 'users', 'support', 'content', 'audit'],
-  support: ['overview', 'users', 'kyc', 'support'],
-}
+import { TABS, SCOPE_TABS } from '../components/AdminShell'
 
 export default function Admin() {
   const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
@@ -113,6 +88,7 @@ export default function Admin() {
     try { q = new URLSearchParams(window.location.search) } catch { return }
     const t = q.get('tab')
     if (t && TABS.some(x => x.id === t)) setTab(t)
+    if (q.get('search')) setSearchOpen(true)
     const uidParam = q.get('user')
     if (uidParam) { navigate('/admin/users/' + uidParam); return }
     const txParam = q.get('tx')
@@ -181,7 +157,7 @@ export default function Admin() {
           <div className="ml-auto flex gap-2">
             <button onClick={() => setSearchOpen(true)} aria-label="Search" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><Search size={18} /></button>
             <button onClick={() => setNotifOpen(true)} aria-label="Notifications" className="relative p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><Bell size={18} />{myUnread > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-extrabold inline-flex items-center justify-center">{myUnread}</span>}</button>
-            <Link to="/" className="hidden sm:inline-flex lg:hidden items-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white">User app</Link>
+            <Link to="/" aria-label="Back to user app" title="Back to user app" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><ArrowLeft size={18} /></Link>
           </div>
         </div>
       </header>

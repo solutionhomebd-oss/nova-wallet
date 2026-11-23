@@ -5,6 +5,7 @@ const Market = lazy(() => import('./pages/Market'))
 const Admin = lazy(() => import('./pages/Admin'))
 import { AppProvider, useApp } from './lib/store'
 import Layout from './components/Layout'
+import AdminShell from './components/AdminShell'
 import { Toasts } from './components/ui'
 import Auth from './pages/Auth'
 import LockScreen from './pages/LockScreen'
@@ -184,7 +185,6 @@ export default function App() {
             <Route path="/receive" element={<ReceiveMoney />} />
             <Route path="/support" element={<SupportListPage />} />
             <Route path="/support/:ticketId" element={<SupportChatPage />} />
-            <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
             <Route path="/admin/users/:userId" element={<Guard admin><Suspense fallback={<div className="p-8 text-center">Loading user…</div>}><AdminUserPage /></Suspense></Guard>} />
             <Route path="/withdraw" element={<DirectWithdraw />} />
             <Route path="/earn" element={<EarnPage />} />
@@ -213,6 +213,12 @@ export default function App() {
             </Route>
           </Route>
           <Route path="/admin" element={<Guard admin><Suspense fallback={<div className="p-8 text-center">Loading admin…</div>}><Admin /></Suspense></Guard>} />
+          {/* Standalone admin pages wear the admin panel's own chrome (AdminShell),
+              never the customer Layout — the admin chat showed the customer's
+              bottom nav until 2026-11-23. */}
+          <Route element={<Guard admin><AdminShell /></Guard>}>
+            <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>

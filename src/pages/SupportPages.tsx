@@ -304,7 +304,7 @@ export function AdminSupportChatPage() {
   }
   const menuItem = "w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800/70 disabled:opacity-50"
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100dvh - 190px)', minHeight: 340 }}>
+    <div className="flex flex-col" style={{ height: 'calc(100dvh - 152px)', minHeight: 340 }}>
       <div className="flex items-center gap-2.5 flex-wrap mb-3 shrink-0">
         <button onClick={() => navigate('/admin?tab=support')} className="w-9 h-9 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0"><ArrowLeft size={17} /></button>
         <Avatar name={tku?.name ?? '?'} photo={tku?.photo} />

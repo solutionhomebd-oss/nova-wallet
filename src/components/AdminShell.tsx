@@ -49,7 +49,7 @@ export default function AdminShell() {
   const [systemOpen, setSystemOpen] = useState(false)
   if (!user) return null
   // The standalone page this shell wraps decides which tab reads as active.
-  const tab: string = pathname.startsWith('/admin/support') ? 'support' : ''
+  const tab: string = pathname.startsWith('/admin/support') ? 'support' : pathname.startsWith('/admin/users') ? 'users' : ''
   const myScope = user.adminScope ?? 'full'
   const visibleTabs = TABS.filter(t => myScope === 'full' || (SCOPE_TABS[myScope] ?? []).includes(t.id))
   const systemTabs = visibleTabs.filter(t => SYSTEM_IDS.includes(t.id))

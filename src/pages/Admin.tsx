@@ -1004,16 +1004,17 @@ export function AdminUserPage() {
           const totalWealth = (sw?.available ?? 0) + (sw?.locked ?? 0) + cryptoValueBdt
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      <header className="sticky top-0 z-30 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-800">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center gap-3">
+    <div>
+      {/* Sub-header sticks UNDER the AdminShell admin bar (top-16) — this page
+          lives inside the admin chrome, not the customer Layout. */}
+      <header className="sticky top-16 z-20 mb-4 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-800">
+        <div className="h-14 flex items-center gap-3">
           <button onClick={() => setDrawerOpen(true)} aria-label="Open sections menu" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><Menu size={18} /></button>
           <button onClick={() => navigate('/admin?tab=users')} aria-label="Back to Users" className="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><ArrowLeft size={18} /></button>
           <h1 className="font-extrabold text-lg truncate">User details</h1>
-          <Link to="/" className="ml-auto hidden sm:inline-flex items-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white">User app</Link>
         </div>
       </header>
-      <main className="max-w-5xl mx-auto px-4 py-5 space-y-4">
+      <main className="space-y-4">
 {/* Header */}
               <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 p-4 text-white shadow-lg shadow-violet-600/25">
                 <div className="flex items-center gap-3.5">

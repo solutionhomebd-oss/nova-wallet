@@ -185,7 +185,7 @@ export default function App() {
             <Route path="/receive" element={<ReceiveMoney />} />
             <Route path="/support" element={<SupportListPage />} />
             <Route path="/support/:ticketId" element={<SupportChatPage />} />
-            <Route path="/admin/users/:userId" element={<Guard admin><Suspense fallback={<div className="p-8 text-center">Loading user…</div>}><AdminUserPage /></Suspense></Guard>} />
+
             <Route path="/withdraw" element={<DirectWithdraw />} />
             <Route path="/earn" element={<EarnPage />} />
             <Route path="/earn/checkin" element={<CheckinPage />} />
@@ -218,6 +218,7 @@ export default function App() {
               bottom nav until 2026-11-23. */}
           <Route element={<Guard admin><AdminShell /></Guard>}>
             <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
+            <Route path="/admin/users/:userId" element={<Suspense fallback={<div className="p-8 text-center">Loading user…</div>}><AdminUserPage /></Suspense>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

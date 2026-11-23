@@ -1145,7 +1145,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const r = await apiPost('/v1/deposit', { method: p.method, amount: p.amount, trxId: p.trxId, receipt: p.receipt, methodId: p.methodId, kind: p.kind, verification: p.verification ?? 'manual' })
       applyMoneyResult(r)
       mutate(d => {
-        notifyAdmins(d, '💰 New deposit request', user.name + ' requested a ' + p.method + ' deposit of ৳' + p.amount.toLocaleString() + ' — review it in Finance.', 'deposit', '/admin?tab=finance')
+        notifyAdmins(d, '💰 New deposit request', user.name + ' requested a ' + p.method + ' deposit of ৳' + p.amount.toLocaleString() + ' — review it in Finance.', 'deposit', '/admin?tab=deposits')
         notify(d, user.id, 'Deposit request submitted', 'Your ' + p.method + ' deposit of ৳' + p.amount.toLocaleString() + (p.verification === 'auto' ? ' is queued for automatic verification — it settles as soon as the payment provider confirms it.' : ' is pending admin review.'), 'deposit')
       })
       return null
@@ -1180,7 +1180,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const r = await apiPost('/v1/withdraw', { method: p.method, amount: p.amount, destination: p.destination, pin: p.pin })
       applyMoneyResult(r)
       mutate(d => {
-        notifyAdmins(d, '💸 New cash out request', user.name + ' requested a cash out of ৳' + p.amount.toLocaleString() + ' to ' + p.destination + ' — review it in Finance.', 'withdraw', '/admin?tab=finance')
+        notifyAdmins(d, '💸 New cash out request', user.name + ' requested a cash out of ৳' + p.amount.toLocaleString() + ' to ' + p.destination + ' — review it in Finance.', 'withdraw', '/admin?tab=withdrawals')
         notify(d, user.id, 'Cash out requested', 'Your cash out of ৳' + p.amount.toLocaleString() + ' is pending admin review.', 'withdraw')
       })
       return null

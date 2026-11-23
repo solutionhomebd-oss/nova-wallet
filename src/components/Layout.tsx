@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Bell, Home, LogOut, MonitorSmartphone, Moon, Newspaper, ShieldCheck, Sun, User as UserIcon, ArrowLeftRight } from 'lucide-react'
+import { Bell, CreditCard, Home, LogOut, MonitorSmartphone, Moon, Newspaper, ShieldCheck, Sun, User as UserIcon, ArrowLeftRight } from 'lucide-react'
 import LogoMark from './LogoMark'
 import { useApp } from '../lib/store'
 import { useConfirm } from './ui'
@@ -7,6 +7,7 @@ import { useConfirm } from './ui'
 const NAV = [
   { to: '/', key: 'nav_home', icon: Home, end: true },
   { to: '/transactions', key: 'nav_transactions', icon: ArrowLeftRight },
+  { to: '/cards', key: 'nav_cards', icon: CreditCard },
   { to: '/news', key: 'nav_news', icon: Newspaper },
   { to: '/profile', key: 'nav_profile', icon: UserIcon },
 ]

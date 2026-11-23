@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, AlertTriangle, ArrowLeft, ArrowLeftRight, Award, BarChart3, Bell, CheckCheck, ChevronDown, CreditCard, Gift, HandCoins, LayoutDashboard, Mail, Megaphone, Menu, MessageCircle, Newspaper, ScrollText, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, ToggleLeft, Users, Wallet, X } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownCircle, ArrowLeft, ArrowLeftRight, ArrowUpCircle, Award, BarChart3, Bell, CheckCheck, ChevronDown, CreditCard, Gift, HandCoins, LayoutDashboard, Mail, Megaphone, Menu, MessageCircle, Newspaper, ScrollText, Search, Send, Server, Settings as SettingsIcon, ShieldCheck, ToggleLeft, Users, Wallet, X } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { Avatar, Badge, Empty, Modal } from './ui'
 import { fmtDateTime } from '../lib/utils'
 
 export const TABS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'finance', label: 'Deposits & Withdrawals', icon: Wallet },
+  { id: 'deposits', label: 'Deposits', icon: ArrowDownCircle },
+  { id: 'withdrawals', label: 'Withdrawals', icon: ArrowUpCircle },
   { id: 'txs', label: 'Transactions', icon: ArrowLeftRight },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'kyc', label: 'KYC Verification', icon: ShieldCheck },
@@ -33,7 +34,7 @@ export const TABS = [
  * interleaves singles and groups ('g-' prefix = group). Tab ids themselves
  * are unchanged, so scopes, badges and deep links keep working. */
 export const MENU_GROUPS = [
-  { id: 'g-finance', label: 'Finance', icon: Wallet, children: ['finance', 'txs'] },
+  { id: 'g-finance', label: 'Finance', icon: Wallet, children: ['deposits', 'withdrawals', 'txs'] },
   { id: 'g-users', label: 'Users', icon: Users, children: ['users', 'kyc', 'levels'] },
   { id: 'g-content', label: 'Content', icon: Newspaper, children: ['broadcast', 'news', 'banners'] },
   { id: 'g-settings', label: 'Settings', icon: SettingsIcon, children: ['settings', 'features', 'payments', 'danger'] },
@@ -100,7 +101,7 @@ export function AdminMenuNav({ tabs, badges, active, onGo }: { tabs: readonly Me
 /** Which tabs each admin scope may see. 'full' (the owner) sees all.
  * The Worker enforces the same boundaries on the API itself. */
 export const SCOPE_TABS: Record<string, string[]> = {
-  finance: ['overview', 'finance', 'txs', 'users', 'loans', 'referrals', 'levels', 'reports', 'audit'],
+  finance: ['overview', 'deposits', 'withdrawals', 'txs', 'users', 'loans', 'referrals', 'levels', 'reports', 'audit'],
   content: ['overview', 'users', 'support', 'broadcast', 'news', 'banners', 'audit'],
   support: ['overview', 'users', 'kyc', 'support'],
 }
@@ -122,7 +123,8 @@ export default function AdminShell() {
   const myScope = user.adminScope ?? 'full'
   const visibleTabs = TABS.filter(t => myScope === 'full' || (SCOPE_TABS[myScope] ?? []).includes(t.id))
   const tabBadges: Record<string, number> = {
-    finance: db.deposits.filter(d => d.status === 'pending').length + db.withdrawals.filter(d => d.status === 'pending').length,
+    deposits: db.deposits.filter(d => d.status === 'pending').length,
+    withdrawals: db.withdrawals.filter(d => d.status === 'pending').length,
     kyc: db.users.filter(u => u.kyc === 'pending').length,
     loans: db.loans.filter(l => l.status === 'pending').length,
     levels: db.levelRequests.filter(r => r.status === 'pending').length,
@@ -137,7 +139,7 @@ export default function AdminShell() {
     // The /admin page parses tab=/user=/tx=/kycfocus= deep links on mount,
     // so a notification's own link can simply be navigated to.
     if (n.link && n.link.startsWith('/admin')) { navigate(n.link); return }
-    const kindTab: Record<string, string> = { support: 'support', deposit: 'finance', withdraw: 'finance', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
+    const kindTab: Record<string, string> = { support: 'support', deposit: 'deposits', withdraw: 'withdrawals', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
     navigate('/admin?tab=' + (kindTab[n.kind] ?? 'overview'))
   }
   return (

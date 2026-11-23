@@ -83,7 +83,7 @@ export default function Admin() {
   useEffect(() => {
     let q: URLSearchParams
     try { q = new URLSearchParams(window.location.search) } catch { return }
-    const t = q.get('tab') === 'content' ? 'news' : q.get('tab')
+    const t = q.get('tab') === 'content' ? 'news' : q.get('tab') === 'finance' ? 'deposits' : q.get('tab')
     if (t && TABS.some(x => x.id === t)) setTab(t)
     if (q.get('search')) setSearchOpen(true)
     const uidParam = q.get('user')
@@ -120,7 +120,8 @@ export default function Admin() {
     }
   }, [db])
   const tabBadges: Record<string, number> = {
-    finance: stats.pendingDeposits.length + stats.pendingWithdrawals.length,
+    deposits: stats.pendingDeposits.length,
+    withdrawals: stats.pendingWithdrawals.length,
     kyc: stats.pendingKyc.length,
     loans: stats.pendingLoans.length,
     levels: pendingLevels,
@@ -137,9 +138,9 @@ export default function Admin() {
     markRead(n.id); setNotifOpen(false)
     const link = n.link ?? ''
     const tabM = link.match(/tab=([a-z]+)/); const userM = link.match(/user=([A-Za-z0-9-]+)/)
-    const kindTab: Record<string, string> = { support: 'support', deposit: 'finance', withdraw: 'finance', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
+    const kindTab: Record<string, string> = { support: 'support', deposit: 'deposits', withdraw: 'withdrawals', loan: 'loans', kyc: 'kyc', upgrade: 'levels' }
     const rawTarget = tabM?.[1] ?? kindTab[n.kind] ?? 'overview'
-    const target = rawTarget === 'content' ? 'news' : rawTarget
+    const target = rawTarget === 'content' ? 'news' : rawTarget === 'finance' ? 'deposits' : rawTarget
     if (TABS.some(x => x.id === target)) setTab(target)
     if (userM) { const du = db.users.find(x => x.id === userM[1]); if (du) openUser(du) }
   }
@@ -255,9 +256,9 @@ export default function Admin() {
           </div>
         )}
 
-        {tab === 'finance' && (
+        {tab === 'deposits' && (
           <div className="space-y-6 anim-fade-up">
-            <section>
+                        <section>
               <h3 className="font-extrabold mb-3">Deposit requests</h3>
               {db.deposits.length === 0 ? <Card><Empty title="No deposit requests" /></Card> : db.deposits.map(d => (
                 <Card key={d.id} className="p-4 mb-2 flex flex-wrap items-center gap-3">
@@ -267,6 +268,16 @@ export default function Admin() {
                 </Card>
               ))}
             </section>
+            <Card className="p-5">
+              <h3 className="font-extrabold mb-2">Ledger integrity (double-entry)</h3>
+              <p className="text-sm text-slate-500">Total ledger entries: <b>{db.ledger.length}</b> · Debits = Credits check: <b className="text-emerald-600">{db.ledger.reduce((s, l) => s + l.debit, 0) - db.ledger.reduce((s, l) => s + l.credit, 0) === 0 ? 'Not applicable per-entry (paired)' : 'Review'} — every transaction writes a balanced pair.</b></p>
+              <p className="text-sm text-slate-500 mt-1">Balances are never edited directly outside audited adjustments (see Users tab), which also write ledger entries.</p>
+            </Card>
+          </div>
+        )}
+
+        {tab === 'withdrawals' && (
+          <div className="space-y-6 anim-fade-up">
             <section>
               <h3 className="font-extrabold mb-3">Withdrawal requests</h3>
               {db.withdrawals.length === 0 ? <Card><Empty title="No withdrawal requests" /></Card> : db.withdrawals.map(d => (
@@ -277,11 +288,6 @@ export default function Admin() {
                 </Card>
               ))}
             </section>
-            <Card className="p-5">
-              <h3 className="font-extrabold mb-2">Ledger integrity (double-entry)</h3>
-              <p className="text-sm text-slate-500">Total ledger entries: <b>{db.ledger.length}</b> · Debits = Credits check: <b className="text-emerald-600">{db.ledger.reduce((s, l) => s + l.debit, 0) - db.ledger.reduce((s, l) => s + l.credit, 0) === 0 ? 'Not applicable per-entry (paired)' : 'Review'} — every transaction writes a balanced pair.</b></p>
-              <p className="text-sm text-slate-500 mt-1">Balances are never edited directly outside audited adjustments (see Users tab), which also write ledger entries.</p>
-            </Card>
           </div>
         )}
 

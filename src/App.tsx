@@ -29,6 +29,7 @@ const SendMoney = lazyNamed(() => import('./pages/Services'), 'SendMoney')
 const LoanPage = lazyNamed(() => import('./pages/ReferralLoan'), 'LoanPage')
 const Referral = lazyNamed(() => import('./pages/ReferralLoan'), 'Referral')
 const DirectWithdraw = lazyNamed(() => import('./pages/Extras'), 'DirectWithdraw')
+const CardsPage = lazyNamed(() => import('./pages/Extras'), 'CardsPage')
 const SupportListPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportListPage')
 const SupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportChatPage')
 const AdminSupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'AdminSupportChatPage')
@@ -207,6 +208,7 @@ export default function App() {
             <Route path="/loan/history" element={<LoanPage view="history" />} />
             <Route path="/crypto" element={<Suspense fallback={<PageLoader label="Loading market…" />}><Market /></Suspense>} />
             <Route path="/transactions" element={<Transactions />} />
+            <Route path="/cards" element={<CardsPage />} />
             <Route path="/news" element={<NewsList />} />
             <Route path="/news/:id" element={<NewsDetail />} />
             <Route path="/notifications" element={<Notifications />} />

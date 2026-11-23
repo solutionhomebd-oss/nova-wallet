@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeftRight, Award, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowLeftRight, Award, BadgePercent, Globe, Nfc, Snowflake, TrendingDown, TrendingUp } from 'lucide-react'
+import LogoMark from '../components/LogoMark'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { withdrawMethods, CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
@@ -418,6 +419,55 @@ export function TradePage() {
           </Card>
         </>
       )}
+    </div>
+  )
+}
+
+/** Cards — the owner's new main-nav section (2026-11-23), sitting between
+ * Transactions and News. Virtual cards are not issuable yet, so the page is
+ * an honest preview: a designed card carrying the user's own name and
+ * NovaWallet address, the launch feature list, and a notify-me opt-in
+ * (stored on-device). No fake card number, no fake functionality. */
+export function CardsPage() {
+  const { user, t, toast } = useApp()
+  const [notified, setNotified] = useState(() => { try { return localStorage.getItem('nova.cardsNotify') === '1' } catch { return false } })
+  if (!user) return null
+  const addr = (user.novaAddress ?? '').replace(/(.{4})/g, '$1 ').trim()
+  const notify = () => { try { localStorage.setItem('nova.cardsNotify', '1') } catch { /* storage unavailable */ } setNotified(true); toast({ kind: 'success', title: t('cards_notified') }) }
+  return (
+    <div>
+      <PageHead title={t('nav_cards')} sub={t('cards_soon_title')} />
+      <div className="max-w-md space-y-5">
+        <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 text-white shadow-2xl shadow-violet-600/30 aspect-[8/5]">
+          <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-white/10" />
+          <div className="absolute -bottom-24 -left-10 w-56 h-56 rounded-full bg-black/10" />
+          <div className="relative p-6 h-full flex flex-col">
+            <div className="flex items-start justify-between">
+              <span className="rounded-2xl shadow-lg shadow-black/20 inline-flex overflow-hidden"><LogoMark size={44} /></span>
+              <span className="text-[11px] font-extrabold tracking-[0.25em] uppercase bg-white/20 rounded-full px-3 py-1.5">{t('cards_virtual')}</span>
+            </div>
+            <div className="mt-5 flex items-center gap-3">
+              <div className="w-11 h-8 rounded-md bg-gradient-to-br from-amber-200 to-amber-400 border border-amber-100/70 shadow-inner" />
+              <Nfc size={22} className="opacity-80" />
+            </div>
+            <p className="mt-4 font-mono tracking-[0.14em] text-[13px] sm:text-sm break-all">{addr}</p>
+            <div className="mt-auto flex items-end justify-between gap-3">
+              <div className="min-w-0"><p className="text-[10px] uppercase tracking-[0.2em] text-white/70">{t('cards_holder')}</p><p className="font-bold uppercase truncate">{user.name}</p></div>
+              <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] bg-white/20 rounded-full px-2.5 py-1 shrink-0">{t('cards_preview')}</span>
+            </div>
+          </div>
+        </div>
+        <Card className="p-6 space-y-4">
+          <h3 className="font-extrabold text-lg">{t('cards_soon_title')}</h3>
+          <p className="text-sm text-slate-500 leading-relaxed">{t('cards_soon_body')}</p>
+          <ul className="space-y-3 text-sm font-semibold">
+            <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Globe size={16} /></span>{t('cards_feat_online')}</li>
+            <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><Snowflake size={16} /></span>{t('cards_feat_freeze')}</li>
+            <li className="flex items-center gap-3"><span className="p-2 rounded-xl bg-violet-100 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300"><BadgePercent size={16} /></span>{t('cards_feat_fee')}</li>
+          </ul>
+          <Btn className="w-full" disabled={notified} onClick={notify}>{notified ? '✓ ' + t('cards_notified') : t('cards_notify')}</Btn>
+        </Card>
+      </div>
     </div>
   )
 }

@@ -843,7 +843,7 @@ async function handleDeposit(request, env, auth, body) {
     if (String(e?.message || e).includes("UNIQUE")) return json(request, { error: "This transaction ID has already been submitted." }, 400);
     return json(request, { error: "Deposit failed: " + String(e?.message || e) }, 500);
   }
-  await notifyAdminsServer(db, "deposit", "💰 New deposit request", "A deposit of " + amount + " via " + method + " is waiting for review.", "/admin?tab=finance");
+  await notifyAdminsServer(db, "deposit", "💰 New deposit request", "A deposit of " + amount + " via " + method + " is waiting for review.", "/admin?tab=deposits");
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
 
@@ -878,7 +878,7 @@ async function handleWithdraw(request, env, auth, body) {
   } catch (e) {
     return json(request, { error: "Cash out failed: " + String(e?.message || e) }, 500);
   }
-  await notifyAdminsServer(db, "withdraw", "🏧 New cash out request", "A cash out of " + amount + " to " + method + " is waiting for review.", "/admin?tab=finance");
+  await notifyAdminsServer(db, "withdraw", "🏧 New cash out request", "A cash out of " + amount + " to " + method + " is waiting for review.", "/admin?tab=withdrawals");
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
 

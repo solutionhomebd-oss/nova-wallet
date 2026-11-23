@@ -82,10 +82,10 @@ export default function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/92 dark:bg-slate-900/92 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4">
+        <div className="flex">
           {NAV.map(n => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold ${isActive ? 'text-violet-600 dark:text-violet-400' : 'text-slate-400'}`}>
-              <n.icon size={22} /> {t(n.key)}
+            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `flex-1 min-w-0 flex flex-col items-center gap-0.5 px-1 py-2.5 text-[10px] font-semibold ${isActive ? 'text-violet-600 dark:text-violet-400' : 'text-slate-400'}`}>
+              <n.icon size={22} /> <span className="max-w-full truncate">{t(n.key)}</span>
             </NavLink>
           ))}
         </div>

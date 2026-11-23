@@ -6,6 +6,7 @@ const Admin = lazy(() => import('./pages/Admin'))
 import { AppProvider, useApp } from './lib/store'
 import Layout from './components/Layout'
 import AdminShell from './components/AdminShell'
+import { PageLoader } from './components/LogoLoader'
 import { Toasts } from './components/ui'
 import Auth from './pages/Auth'
 import LockScreen from './pages/LockScreen'
@@ -169,7 +170,7 @@ export default function App() {
         <Toasts />
         <LockGate />
         <SystemNotifier />
-        <Suspense fallback={<div className="p-10 text-center text-sm font-semibold text-slate-400">Loading…</div>}>
+        <Suspense fallback={<PageLoader label="Loading…" />}>
         <Routes>
           <Route path="/home" element={<Navigate to="/" replace />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
@@ -204,7 +205,7 @@ export default function App() {
             <Route path="/loan/close" element={<LoanPage view="close" />} />
             <Route path="/loan/noc" element={<LoanPage view="noc" />} />
             <Route path="/loan/history" element={<LoanPage view="history" />} />
-            <Route path="/crypto" element={<Suspense fallback={<div className="p-8 text-center">Loading market…</div>}><Market /></Suspense>} />
+            <Route path="/crypto" element={<Suspense fallback={<PageLoader label="Loading market…" />}><Market /></Suspense>} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/news" element={<NewsList />} />
             <Route path="/news/:id" element={<NewsDetail />} />
@@ -212,13 +213,13 @@ export default function App() {
             <Route path="/profile" element={<Profile />} />
             </Route>
           </Route>
-          <Route path="/admin" element={<Guard admin><Suspense fallback={<div className="p-8 text-center">Loading admin…</div>}><Admin /></Suspense></Guard>} />
+          <Route path="/admin" element={<Guard admin><Suspense fallback={<PageLoader label="Loading admin…" />}><Admin /></Suspense></Guard>} />
           {/* Standalone admin pages wear the admin panel's own chrome (AdminShell),
               never the customer Layout — the admin chat showed the customer's
               bottom nav until 2026-11-23. */}
           <Route element={<Guard admin><AdminShell /></Guard>}>
             <Route path="/admin/support/:ticketId" element={<AdminSupportChatPage />} />
-            <Route path="/admin/users/:userId" element={<Suspense fallback={<div className="p-8 text-center">Loading user…</div>}><AdminUserPage /></Suspense>} />
+            <Route path="/admin/users/:userId" element={<Suspense fallback={<PageLoader label="Loading user…" />}><AdminUserPage /></Suspense>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

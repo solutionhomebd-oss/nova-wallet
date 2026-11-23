@@ -9,6 +9,7 @@ import { hashSecret, nowISO, rid, uid } from './utils'
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut as fbSignOut, updatePassword as fbUpdatePassword } from 'firebase/auth'
 import { firebaseAuth } from './firebase'
 import { apiBootstrap, apiMe, apiGet, apiPost, publicPost } from './api'
+import LogoLoader from '../components/LogoLoader'
 
 const KEY = 'novawallet.db.v3'
 const SESSION = 'novawallet.session'
@@ -1775,11 +1776,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       {children}
       {busyLabel && (
         <div className="fixed inset-0 z-[95] flex flex-col items-center justify-center gap-4 bg-slate-950/60 backdrop-blur-[2px]">
-          <div className="relative h-16 w-16">
-            <div className="absolute inset-0 rounded-full border-4 border-white/15" />
-            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-violet-400 animate-spin" />
-            <div className="absolute inset-0 flex items-center justify-center text-xl font-black text-white">N</div>
-          </div>
+          <LogoLoader size={76} />
           <p className="text-sm font-bold text-white">{busyLabel}</p>
           <p className="text-xs text-slate-300 -mt-2">Please wait — do not press back or tap again</p>
         </div>

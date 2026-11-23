@@ -5,6 +5,7 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
 import { Avatar, Badge, Btn, Card, Empty, Input, Modal, Select, TxDirIcon, statusTone } from '../components/ui'
+import LogoLoader, { PageLoader } from '../components/LogoLoader'
 import { fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
@@ -371,7 +372,7 @@ export default function Admin() {
                         </div>
                         {photos === undefined ? (
                           <Btn variant="outline" className="!py-2 !text-xs mt-3" onClick={() => loadKycPhotos(u)}>View documents & face photo</Btn>
-                        ) : photos === 'loading' ? <p className="text-xs text-slate-400 mt-3">Loading photos…</p> : (
+                        ) : photos === 'loading' ? <div className="mt-3 flex items-center gap-2.5"><LogoLoader size={22} /><span className="text-xs text-slate-400">Loading photos…</span></div> : (
                           <div className="flex flex-wrap gap-3 mt-3">
                             {(photos.docPhoto || u.kycDocPhoto) && <figure><a href={photos.docPhoto || u.kycDocPhoto} target="_blank" rel="noreferrer"><img src={photos.docPhoto || u.kycDocPhoto} alt="KYC document" className="h-32 w-48 object-cover rounded-xl border border-slate-200 dark:border-slate-700" /></a><figcaption className="text-[11px] text-slate-400 mt-1 text-center">{docLabel(u.kycDocType)}</figcaption></figure>}
                             {(photos.facePhoto || u.kycFacePhoto) && <figure><a href={photos.facePhoto || u.kycFacePhoto} target="_blank" rel="noreferrer"><img src={photos.facePhoto || u.kycFacePhoto} alt="KYC face scan" className="h-32 w-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700" /></a><figcaption className="text-[11px] text-slate-400 mt-1 text-center">Face photo</figcaption></figure>}
@@ -743,7 +744,7 @@ export default function Admin() {
             <Card className="p-5">
               <h3 className="font-extrabold mb-1">Recent emails</h3>
               <p className="text-xs text-slate-400 mb-4">Latest 50, newest first.</p>
-              {emailLog === null ? <p className="text-sm text-slate-400">Loading…</p> : emailLog.length === 0 ? <Empty title="No emails yet" body="When the system sends an email, it will show up here." /> : (
+              {emailLog === null ? <PageLoader compact label="Loading…" /> : emailLog.length === 0 ? <Empty title="No emails yet" body="When the system sends an email, it will show up here." /> : (
                 <div className="space-y-2">{emailLog.map((e: any) => (
                   <div key={e.id} className="rounded-2xl border border-slate-200/70 dark:border-slate-800 p-3.5">
                     <p className="font-bold text-sm flex items-center gap-2 flex-wrap">{e.subject} <Badge tone={e.status === 'sent' ? 'green' : 'red'}>{e.status}</Badge> <Badge tone="slate">{e.kind}</Badge></p>

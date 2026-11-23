@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Check, Info, KeyRound, Loader2, Mail, MoreVertical
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
 import { Avatar, Badge, Btn, Card, Empty, Input, MsgTicks } from '../components/ui'
+import LogoLoader from '../components/LogoLoader'
 import { fmtDateTime } from '../lib/utils'
 import type { SupportTicket } from '../lib/types'
 
@@ -399,7 +400,7 @@ export function AdminSupportChatPage() {
                     <p className="font-extrabold text-sm">Quick replies</p>
                     <button onClick={() => setTplForm({ title: '', text: '' })} className="text-xs font-bold text-violet-600">+ New template</button>
                   </div>
-                  {canned === null ? <p className="text-xs text-slate-400 flex items-center gap-2 py-2"><Loader2 size={13} className="animate-spin" /> Loading…</p>
+                  {canned === null ? <div className="flex items-center gap-2.5 py-2"><LogoLoader size={24} /><span className="text-xs text-slate-400">Loading…</span></div>
                     : canned.length === 0 ? <p className="text-xs text-slate-400 py-2">No templates yet — create your first one.</p>
                     : canned.map(c => (
                       <div key={c.id} className="flex items-start gap-2 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">

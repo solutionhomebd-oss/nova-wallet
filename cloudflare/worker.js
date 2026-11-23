@@ -493,6 +493,13 @@ async function loadOverview(db, lite = false) {
     loans.push(...st.loans);
     stakes.push(...st.stakes);
   }
+  if (lite) {
+    // Loan applications embed the applicant's photo as a base64 data URL
+    // (one real application is ~300 KB) — far too heavy for an action
+    // response. The client keeps the copy it already has on screen (see
+    // applyOverviewInto), so dropping it here loses nothing.
+    for (const l of loans) for (const k of Object.keys(l)) { const v = l[k]; if (typeof v === "string" && v.length > 20000 && v.startsWith("data:")) delete l[k]; }
+  }
   const byDate = (a, b) => (a.createdAt < b.createdAt ? 1 : -1);
   transactions.sort(byDate); deposits.sort(byDate); withdrawals.sort(byDate); loans.sort(byDate); stakes.sort(byDate);
   // Lite mode (action responses — approve/reject, adjust, trade, tx actions):

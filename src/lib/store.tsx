@@ -567,8 +567,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { userId: resolve(u.id), available: w?.available ?? 0, locked: w?.locked ?? 0, holdings: w?.holdings ?? {} }
     })
     const mapRows = (rows: any[]) => rows.map((r: any) => ({ ...r, userId: resolve(r.userId) }))
+    // Lite action overviews omit heavy loan photos (base64 data URLs) —
+    // carry over the copy already on screen so the Loans tab keeps them.
+    const oldLoanPhotos = new Map(d.loans.map(l => [l.id, (l as any).photo as string | undefined]))
     d.txs = mapRows(ov.transactions); d.deposits = mapRows(ov.deposits); d.withdrawals = mapRows(ov.withdrawals)
     d.loans = mapRows(ov.loans); d.stakes = mapRows(ov.stakes)
+    for (const l of d.loans) { const p = oldLoanPhotos.get(l.id); if (p && !(l as any).photo) (l as any).photo = p }
     // Final normalization: any row still keyed by a real user's server
     // uid is re-keyed to that user's local id, whatever the map said —
     // the signed-in user's own wallet and transactions must never end up

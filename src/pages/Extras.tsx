@@ -459,12 +459,12 @@ export function CardsPage() {
               <div className="absolute inset-0 [backface-visibility:hidden] overflow-hidden rounded-[28px] bg-gradient-to-br from-violet-600 via-purple-600 to-cyan-500 text-white shadow-2xl shadow-violet-600/30">
                 <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-white/10" />
                 <div className="absolute -bottom-24 -left-10 w-56 h-56 rounded-full bg-black/10" />
-                <div className="relative p-6 h-full flex flex-col">
+                <div className="relative p-5 sm:p-6 h-full flex flex-col">
                   <div className="flex items-start justify-between">
                     <LogoMark size={44} />
                     <span className="text-[11px] font-extrabold tracking-[0.25em] uppercase bg-white/20 rounded-full px-3 py-1.5">{t('cards_virtual')}</span>
                   </div>
-                  <div className="mt-5 flex items-center gap-3">
+                  <div className="mt-4 flex items-center gap-3">
                     <svg width="46" height="34" viewBox="0 0 46 34" aria-hidden="true">
                       <defs><linearGradient id={'nwchip' + chipId} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#fde68a" /><stop offset="100%" stopColor="#f59e0b" /></linearGradient></defs>
                       <rect x="0.6" y="0.6" width="44.8" height="32.8" rx="5" fill={`url(#nwchip${chipId})`} stroke="#92400e" strokeOpacity="0.45" />
@@ -473,7 +473,7 @@ export function CardsPage() {
                     </svg>
                     <Nfc size={22} className="opacity-80" />
                   </div>
-                  <p className="mt-4 font-mono tracking-[0.14em] text-[13px] sm:text-sm break-all">{addr}</p>
+                  <p className="mt-3 font-mono tracking-[0.1em] text-[11px] sm:text-[13px] whitespace-nowrap">{addr}</p>
                   <div className="mt-auto flex items-end justify-between gap-3">
                     <p className="font-bold uppercase truncate text-lg">{user.name}</p>
                     <span className="font-extrabold text-lg tracking-tight text-white drop-shadow-md shrink-0">Nova<span className="text-violet-500">Wallet</span></span>
@@ -481,19 +481,19 @@ export function CardsPage() {
                 </div>
               </div>
               <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-800 via-indigo-950 to-violet-900 text-white shadow-2xl shadow-violet-600/30">
-                <div className="h-9 bg-neutral-900 mt-4" />
-                <div className="px-6 pt-3">
+                <div className="h-8 bg-neutral-900 mt-3" />
+                <div className="px-5 sm:px-6 pt-2.5">
                   <p className="text-[9px] uppercase tracking-[0.2em] text-white/60">Authorized signature — not valid unless signed</p>
                   <div className="mt-1.5 flex items-stretch gap-2">
-                    <div className="flex-1 bg-slate-100 rounded h-9" />
+                    <div className="flex-1 bg-slate-100 rounded h-8" />
                     <div className="bg-white text-slate-900 rounded px-2.5 py-1 text-center shrink-0"><span className="block text-[8px] font-extrabold tracking-widest text-slate-500">CVV</span><span className="block font-mono font-bold leading-none">***</span></div>
                   </div>
-                  <div className="mt-3 space-y-0 text-[10px] leading-snug text-white/85 font-semibold">
+                  <div className="mt-2.5 space-y-0 text-[10px] leading-tight text-white/85 font-semibold">
                     <p>www.novawallet.pp.ua</p>
                     <p>support@novawallet.pp.ua</p>
                   </div>
-                  <div className="mt-2.5 flex items-end gap-3">
-                    <p className="flex-1 text-[8.5px] leading-snug text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
+                  <div className="mt-2 flex items-end gap-3">
+                    <p className="flex-1 text-[8px] leading-snug text-white/50">This is a preview of the NovaWallet virtual card. The card remains the property of NovaWallet and may only be used by the named holder, subject to the NovaWallet terms. Questions about this card? Contact us at the email above.</p>
                     <span className="shrink-0"><LogoMark size={24} /></span>
                   </div>
                 </div>

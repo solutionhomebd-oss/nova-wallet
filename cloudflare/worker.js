@@ -361,6 +361,16 @@ function clientIp(request) {
   return request.headers.get("CF-Connecting-IP") || (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() || "";
 }
 
+// Country of the request that created the account. Cloudflare supplies this
+// from the connecting IP; it is captured once at bootstrap/registration and
+// never overwritten by later sign-ins, which may happen from another country.
+function requestCountry(request) {
+  const raw = request.cf?.country || request.headers.get("CF-IPCountry") || "";
+  const code = String(raw).trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code) || ["XX", "T1", "A1", "A2", "EU", "AP"].includes(code)) return null;
+  return code;
+}
+
 function txStmt(db, t) {
   const pub = pubId("TXN");
   const id = crypto.randomUUID();
@@ -409,6 +419,7 @@ async function loadState(db, uid, lite = false) {
       phone: me.phone || "", ...(me.avatar_url ? { photo: me.avatar_url } : {}),
       role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code, emailVerified: Number(me.email_verified) === 1,
       pinHash: me.pin_hash || "", novaAddress: me.nova_address || "",
+      ...(me.registration_country ? { registrationCountry: me.registration_country } : {}),
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
       cardWishlistJoined: !!wlRow,
@@ -463,7 +474,7 @@ async function loadState(db, uid, lite = false) {
 
 async function loadDirectory(db, includePhone = false) {
   const rows = await db.prepare(
-    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.nova_address, u.admin_scope, u.created_at, u.pin_fail_count, u.pin_locked_until, p.full_name,
+    `SELECT u.id, u.email, u.username, u.phone, u.role, u.status, u.level, u.referral_code, u.nova_address, u.registration_country, u.admin_scope, u.created_at, u.pin_fail_count, u.pin_locked_until, p.full_name,
        (SELECT status FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_status,
        (SELECT doc_type FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_type,
        (SELECT doc_number FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_number,
@@ -474,6 +485,7 @@ async function loadDirectory(db, includePhone = false) {
     id: u.id, email: u.email, username: u.username, name: u.full_name || "",
     ...(includePhone ? { phone: u.phone || "" } : {}),
     role: u.role, status: u.status, level: Number(u.level), referralCode: u.referral_code, novaAddress: u.nova_address || "",
+    ...(u.registration_country ? { registrationCountry: u.registration_country } : {}),
     ...(u.admin_scope ? { adminScope: u.admin_scope } : {}),
     pinFailCount: Number(u.pin_fail_count || 0), ...(u.pin_locked_until ? { pinLockedUntil: u.pin_locked_until } : {}),
     createdAt: isoOf(u.created_at),
@@ -651,11 +663,12 @@ async function handleBootstrap(request, env, auth) {
       }
     } catch { /* verification is best effort at bootstrap */ }
   }
+  const registrationCountry = requestCountry(request);
   const walletId = crypto.randomUUID();
   const stmts = [
     db.prepare(
-      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by, email_verified, nova_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId, emailVerified, novaAddress),
+      "INSERT INTO users (id, email, phone, username, pin_hash, pin_hash_v2, referral_code, referred_by, email_verified, nova_address, registration_country) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(auth.uid, email, phone, username, pinHash, await pbkdf2Hash(pinHash), referralCode, referrerId, emailVerified, novaAddress, registrationCountry),
     db.prepare("INSERT INTO user_profiles (user_id, full_name) VALUES (?, ?)").bind(auth.uid, fullName),
     db.prepare("INSERT INTO wallets (id, user_id) VALUES (?, ?)").bind(walletId, auth.uid),
     db.prepare("INSERT INTO wallet_balances (wallet_id, currency, available, locked) VALUES (?, 'BDT', 0, 0)").bind(walletId),
@@ -682,7 +695,7 @@ async function handleMe(request, env, auth) {
     user: {
       id: row.id, email: row.email, username: row.username, fullName: row.full_name,
       phone: row.phone, role: row.role, status: row.status, level: row.level,
-      referralCode: row.referral_code, pinHash: row.pin_hash, novaAddress: row.nova_address || "", emailVerified: Number(row.email_verified) === 1,
+      referralCode: row.referral_code, pinHash: row.pin_hash, novaAddress: row.nova_address || "", registrationCountry: row.registration_country || "", emailVerified: Number(row.email_verified) === 1,
       walletId: wallet ? wallet.id : null,
     },
   });
@@ -2079,16 +2092,116 @@ async function handleAdminBackup(request, env, auth) {
 // face_url). The latest row's status IS the user's KYC status — state and
 // directory expose the status + document meta, photos are served only by
 // the admin review endpoint so state pulls stay light.
+// ---- KYC hardening (Tier 1) -------------------------------------------------
+// Document numbers are compared normalized (case/space/dash-insensitive), so
+// the same document cannot slip onto a second account with different spacing.
+const normDocNumber = (s) => String(s || "").toUpperCase().replace(/[\s-]+/g, "");
+function docNumberError(docType, docNumber) {
+  const n = normDocNumber(docNumber);
+  if (docType === "nid") return /^\d{10}$|^\d{13}$|^\d{17}$/.test(n) ? null : "Enter a valid NID number (10, 13 or 17 digits).";
+  if (docType === "passport") return /^[A-Z]{1,2}\d{7,8}$/.test(n) ? null : "Enter a valid passport number (for example A01234567).";
+  if (docType === "driving") return /^[A-Z0-9]{6,24}$/.test(n) ? null : "Enter a valid driving licence number.";
+  return n.length >= 5 ? null : "Enter a valid document number.";
+}
+// Another account already VERIFIED with this document? Returns its uid.
+async function verifiedDocOwner(db, docType, docNumber, exceptUid) {
+  const n = normDocNumber(docNumber);
+  if (!n) return null;
+  const rows = await db.prepare("SELECT user_id, doc_number FROM kyc_submissions WHERE doc_type = ? AND status = 'verified' AND user_id != ?").bind(docType, exceptUid).all();
+  for (const r of rows.results) if (normDocNumber(r.doc_number) === n) return r.user_id;
+  return null;
+}
+// Uploaded photos arrive as base64 data URLs and keep whatever metadata the
+// camera wrote into them (EXIF carries GPS coordinates). The image bytes are
+// validated against their declared type and every metadata segment/chunk is
+// stripped before storage: JPEG APP1-APP15 + COM, PNG text/EXIF/time chunks,
+// WebP EXIF/XMP. A file whose bytes do not match its declared type is refused.
+function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+function bytesToB64(bytes) { let bin = ""; const CH = 0x8000; for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH)); return btoa(bin); }
+function joinBytes(parts) { let total = 0; for (const x of parts) total += x.length; const out = new Uint8Array(total); let o = 0; for (const x of parts) { out.set(x, o); o += x.length; } return out; }
+function stripJpegMetadata(b) {
+  if (b.length < 4 || b[0] !== 0xFF || b[1] !== 0xD8) return null;
+  const parts = [b.subarray(0, 2)];
+  let i = 2;
+  while (i + 4 <= b.length) {
+    if (b[i] !== 0xFF) return null;
+    const marker = b[i + 1];
+    if (marker === 0xDA) { parts.push(b.subarray(i)); return joinBytes(parts); }
+    if (marker === 0xD9 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) return null;
+    const len = (b[i + 2] << 8) | b[i + 3];
+    if (len < 2 || i + 2 + len > b.length) return null;
+    const isMetadata = (marker >= 0xE1 && marker <= 0xEF) || marker === 0xFE;
+    if (!isMetadata) parts.push(b.subarray(i, i + 2 + len));
+    i += 2 + len;
+  }
+  return null;
+}
+function stripPngMetadata(b) {
+  const SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  if (b.length < 8 || !SIG.every((v, i) => b[i] === v)) return null;
+  const KEEP = new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "bKGD", "hIST", "pHYs", "sPLT"]);
+  const parts = [b.subarray(0, 8)];
+  let i = 8;
+  while (i + 12 <= b.length) {
+    const len = (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+    const type = String.fromCharCode(b[i + 4], b[i + 5], b[i + 6], b[i + 7]);
+    const total = 12 + len;
+    if (len < 0 || i + total > b.length) return null;
+    const critical = type[0] >= "A" && type[0] <= "Z";
+    if (critical || KEEP.has(type)) parts.push(b.subarray(i, i + total));
+    i += total;
+    if (type === "IEND") return joinBytes(parts);
+  }
+  return null;
+}
+function stripWebpMetadata(b) {
+  if (b.length < 20 || !(b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50)) return null;
+  const parts = [b.subarray(0, 12)];
+  let i = 12;
+  while (i + 8 <= b.length) {
+    const type = String.fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3]);
+    const len = b[i + 4] | (b[i + 5] << 8) | (b[i + 6] << 16) | (b[i + 7] << 24);
+    const total = 8 + len + (len % 2);
+    if (len < 0 || i + total > b.length) return null;
+    if (type !== "EXIF" && type !== "XMP ") parts.push(b.subarray(i, i + total));
+    i += total;
+  }
+  if (i !== b.length) return null;
+  const out = joinBytes(parts);
+  const size = out.length - 8;
+  out[4] = size & 0xFF; out[5] = (size >> 8) & 0xFF; out[6] = (size >> 16) & 0xFF; out[7] = (size >> 24) & 0xFF;
+  return out;
+}
+function sanitizeImageDataUrl(dataUrl) {
+  const str = String(dataUrl || "");
+  if (str.length > 1200000) return null;
+  const m = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/.exec(str);
+  if (!m) return null;
+  let bytes;
+  try { bytes = b64ToBytes(m[2].replace(/\s/g, "")); } catch { return null; }
+  if (!bytes.length || bytes.length > 700000) return null;
+  let out = null, mime = m[1];
+  if (mime === "image/png") out = stripPngMetadata(bytes);
+  else if (mime === "image/webp") out = stripWebpMetadata(bytes);
+  else { out = stripJpegMetadata(bytes); mime = "image/jpeg"; }
+  if (!out) return null;
+  return "data:" + mime + ";base64," + bytesToB64(out);
+}
+
 async function handleKycSubmit(request, env, auth, body) {
   const db = env.DB;
   const docType = String(body.docType || "").slice(0, 30);
   const docNumber = String(body.docNumber || "").trim().slice(0, 60);
   if (!docType || !docNumber) return json(request, { error: "Document type and number are required." }, 400);
-  const docPhoto = typeof body.docPhoto === "string" && body.docPhoto.startsWith("data:image/") ? body.docPhoto : null;
-  const facePhoto = typeof body.facePhoto === "string" && body.facePhoto.startsWith("data:image/") ? body.facePhoto : null;
-  if ((docPhoto && docPhoto.length > 900000) || (facePhoto && facePhoto.length > 900000)) {
-    return json(request, { error: "A photo is too large — please retake it." }, 400);
-  }
+  const fmtErr = docNumberError(docType, docNumber);
+  if (fmtErr) return json(request, { error: fmtErr }, 400);
+  const latest = await db.prepare("SELECT status FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(auth.uid).first();
+  if (latest?.status === "pending") return json(request, { error: "Your previous KYC submission is still under review — please wait for the result before submitting again." }, 400);
+  if (latest?.status === "verified") return json(request, { error: "Your identity is already verified." }, 400);
+  if (await verifiedDocOwner(db, docType, docNumber, auth.uid)) return json(request, { error: "This document is already verified on another NovaWallet account." }, 400);
+  let docPhoto = null, facePhoto = null;
+  if (body.docPhoto) { docPhoto = sanitizeImageDataUrl(body.docPhoto); if (!docPhoto) return json(request, { error: "The document photo could not be read — please retake it as a JPG or PNG photo." }, 400); }
+  if (body.facePhoto) { facePhoto = sanitizeImageDataUrl(body.facePhoto); if (!facePhoto) return json(request, { error: "The face photo could not be read — please retake it." }, 400); }
   const id = pubId("KYC");
   await db.prepare("INSERT INTO kyc_submissions (id, user_id, doc_type, doc_number, doc_url, face_url, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')")
     .bind(id, auth.uid, docType, docNumber, docPhoto, facePhoto).run();
@@ -2097,6 +2210,12 @@ async function handleKycSubmit(request, env, auth, body) {
 }
 
 async function handleAdminKycGet(request, env, auth, targetUid) {
+  // Step-up: identity documents open only within 5 minutes of a fresh
+  // password check (POST /v1/stepup). The grant is not consumed — a review
+  // session normally opens several documents — but every view is audited.
+  const grant = await env.DB.prepare("SELECT id FROM step_up_grants WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1").bind(auth.uid, new Date().toISOString()).first();
+  if (!grant) return json(request, { error: "step_up_required", stepUpRequired: true }, 403);
+  await auditLog(env.DB, auth, "kyc.view", targetUid);
   const row = await env.DB.prepare("SELECT * FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(targetUid).first();
   if (!row) return json(request, { ok: true, kyc: null });
   return json(request, {
@@ -2114,18 +2233,30 @@ async function handleAdminKycDecide(request, env, auth, body) {
   const target = String(body.userId || "");
   const row = await db.prepare("SELECT id FROM kyc_submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").bind(target).first();
   if (!row) {
-    // Manual verification: an admin may verify a user who never submitted
-    // documents. Recorded as a 'manual' submission so the profile can
-    // show "Verified by NovaWallet" instead of document details.
+    // Manual verification: verify a user who never submitted documents.
+    // Recorded as a 'manual' submission so the profile can show "Verified
+    // by NovaWallet" instead of document details. Restricted to the FULL
+    // admin (a scoped support admin must review real documents), and every
+    // manual verification is written to the audit log with its reason.
     if (!body.ok) return json(request, { error: "No KYC submission found for this user." }, 404);
+    if (!(auth.role === "admin" && auth.scope === "full")) return json(request, { error: "Manual verification is restricted to the full admin." }, 403);
+    if (!String(body.reason || "").trim()) return json(request, { error: "A reason is required for manual verification — it is written to the audit log." }, 400);
     await db.prepare("INSERT INTO kyc_submissions (id, user_id, doc_type, doc_number, status, reviewed_by) VALUES (?, ?, 'manual', '', 'verified', ?)")
       .bind(pubId("KYC"), target, auth.uid).run();
+    await auditLog(db, auth, "kyc.verify_manual", target + (body.reason ? " · " + String(body.reason).slice(0, 200) : ""));
     await notifyServer(db, target, "security", "✅ Verified by NovaWallet", "Your identity was verified by the NovaWallet team. All limits and features are unlocked.", null);
   await sendUserEmail(env, db, target, "account", "Your NovaWallet identity is verified", "Identity verified", ["Your identity was verified by the NovaWallet team. All limits and features are now unlocked."]);
     return json(request, { ok: true, overview: await loadOverview(db, true) });
   }
+  if (body.ok) {
+    const sub = await db.prepare("SELECT doc_type, doc_number FROM kyc_submissions WHERE id = ?").bind(row.id).first();
+    if (sub && await verifiedDocOwner(db, sub.doc_type, sub.doc_number, target)) {
+      return json(request, { error: "This document has since been verified on another account — it cannot be verified twice." }, 400);
+    }
+  }
   await db.prepare("UPDATE kyc_submissions SET status = ?, reviewed_by = ? WHERE id = ?")
     .bind(body.ok ? "verified" : "unverified", auth.uid, row.id).run();
+  await auditLog(db, auth, body.ok ? "kyc.verify" : "kyc.reject", target);
   await notifyServer(db, target, "security", body.ok ? "✅ KYC verified" : "KYC not approved", body.ok ? "Your identity is verified. All limits and features are unlocked." : "Your KYC submission was not approved. Please check your documents and submit again.", null);
   await sendUserEmail(env, db, target, "account", body.ok ? "Your NovaWallet identity is verified" : "KYC not approved — action needed", body.ok ? "Identity verified" : "KYC not approved", [body.ok ? "Your identity verification is complete. All limits and features are now unlocked." : "Your KYC submission was not approved. Please check your documents and submit again from the app."]);
   return json(request, { ok: true, overview: await loadOverview(db, true) });
@@ -2630,6 +2761,14 @@ async function logEmail(db, e) {
   try { await db.prepare("INSERT INTO email_log (user_id, to_email, kind, subject, status, error, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(e.userId || null, e.to || "", e.kind || "", e.subject || "", e.status || "", e.error ? String(e.error).slice(0, 300) : null, e.ip || null, Date.now()).run(); } catch { /* ignore */ }
 }
 async function sendAndLog(env, db, { userId, to, kind, subject, text, html, ip }) {
+  // Test accounts live at @novawallet.app — a domain with no mail server
+  // (no MX records). Every message sent there bounces back into the sending
+  // Gmail as a "Delivery incomplete" notice, once per retry, so mail to that
+  // domain is logged as skipped and never leaves the Worker.
+  if (/@novawallet\.app$/i.test(String(to || "").trim())) {
+    await logEmail(db, { userId, to, kind, subject, status: "skipped", error: "test_domain_no_mail_server", ip });
+    return { sent: false, reason: "test_domain" };
+  }
   const r = await sendEmail(env, { to, subject, text, html });
   await logEmail(db, { userId, to, kind, subject, status: r.sent ? "sent" : "failed", error: r.sent ? null : r.reason, ip });
   return r;

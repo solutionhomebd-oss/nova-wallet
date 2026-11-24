@@ -14,7 +14,7 @@ import type { PayMethod } from '../lib/types'
 import { TABS, SCOPE_TABS, AdminMenuNav } from '../components/AdminShell'
 
 export default function Admin() {
-  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
+  const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, stepUp, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
   const usdt = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const byDateDesc = <T extends { createdAt: string }>(arr: T[]): T[] => [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   useMarket(30_000)
@@ -72,11 +72,45 @@ export default function Admin() {
   // KYC photos live on the server (too heavy for the directory sync) —
   // the KYC Verification tab fetches them on demand per submission.
   const [kycPhotos, setKycPhotos] = useState<Record<string, { docPhoto?: string; facePhoto?: string } | 'loading'>>({})
+  const [kycStepUpFor, setKycStepUpFor] = useState<any>(null)
+  const [kycStepPw, setKycStepPw] = useState('')
+  const [kycStepBusy, setKycStepBusy] = useState(false)
+  const [manualFor, setManualFor] = useState<any>(null)
+  const [manualReason, setManualReason] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
   const loadKycPhotos = (u: any) => {
     if (kycPhotos[u.id]) return
     setKycPhotos(m => ({ ...m, [u.id]: 'loading' }))
     const uid = u.fbUid ?? u.id
-    apiGet('/v1/admin/kyc/' + uid).then(r => setKycPhotos(m => ({ ...m, [u.id]: { docPhoto: r?.kyc?.docPhoto ?? u.kycDocPhoto, facePhoto: r?.kyc?.facePhoto ?? u.kycFacePhoto } }))).catch(() => setKycPhotos(m => ({ ...m, [u.id]: { docPhoto: u.kycDocPhoto, facePhoto: u.kycFacePhoto } })))
+    apiGet('/v1/admin/kyc/' + uid).then(r => setKycPhotos(m => ({ ...m, [u.id]: { docPhoto: r?.kyc?.docPhoto ?? u.kycDocPhoto, facePhoto: r?.kyc?.facePhoto ?? u.kycFacePhoto } }))).catch((e: any) => {
+      if (String(e?.message || '').includes('step_up_required')) {
+        // Identity documents need a fresh password check first (step-up);
+        // ask for the password, then retry. The view itself is audit-logged.
+        setKycPhotos(m => { const n = { ...m }; delete n[u.id]; return n })
+        setKycStepPw(''); setKycStepUpFor(u)
+        return
+      }
+      setKycPhotos(m => ({ ...m, [u.id]: { docPhoto: u.kycDocPhoto, facePhoto: u.kycFacePhoto } }))
+    })
+  }
+  const submitKycStepUp = async () => {
+    if (!kycStepUpFor || !kycStepPw) return
+    setKycStepBusy(true)
+    const err = await stepUp(kycStepPw)
+    setKycStepBusy(false)
+    if (err) return toast({ kind: 'error', title: 'Password check failed', body: err })
+    const u = kycStepUpFor; setKycStepUpFor(null); setKycStepPw('')
+    loadKycPhotos(u)
+  }
+  const submitManualVerify = async () => {
+    if (!manualFor) return
+    if (!manualReason.trim()) return toast({ kind: 'error', title: 'A reason is required', body: 'Manual verification without documents must say why — it is written to the audit log.' })
+    setManualBusy(true)
+    const err = await decideKyc(manualFor.id, true, manualReason.trim())
+    setManualBusy(false)
+    if (err) return toast({ kind: 'error', title: 'Manual verification failed', body: err })
+    setManualFor(null); setManualReason('')
+    toast({ kind: 'success', title: 'Verified manually — reason saved to the audit log' })
   }
   // Deep links from notifications: /admin?tab=finance|loans|levels|users|support — and
   // ?user=<id> opens that customer's Manage modal straight away (KYC / new-user alerts).
@@ -377,7 +411,7 @@ export default function Admin() {
                     <Card className={`p-4 ${kycFocus === u.id ? 'ring-2 ring-violet-500' : ''}`}><div className="flex flex-wrap items-center gap-3">
                       <Avatar name={u.name} photo={u.photo} />
                       <div className="flex-1 min-w-[170px]"><p className="font-bold">{u.name}</p><p className="text-xs text-slate-400">@{u.username} · {u.email}</p></div>
-                      <Btn variant="success" className="!py-1.5 !text-xs" onClick={() => decideKyc(u.id, true)}>✅ Verify manually</Btn>
+                      <Btn variant="success" className="!py-1.5 !text-xs" onClick={() => { setManualReason(''); setManualFor(u) }}>✅ Verify manually</Btn>
                       <Badge tone="slate">Not submitted</Badge>
                     </div></Card>
                     </div>
@@ -796,6 +830,16 @@ export default function Admin() {
         </main>
       </div>
 
+      <Modal open={!!kycStepUpFor} onClose={() => setKycStepUpFor(null)} title="Confirm it's you">
+        <p className="text-sm text-slate-500 mb-3">Viewing identity documents needs a fresh password check. This view is written to the audit log.</p>
+        <Input label="Your account password" type="password" value={kycStepPw} onChange={e => setKycStepPw(e.target.value)} />
+        <Btn className="w-full mt-3" disabled={kycStepBusy || !kycStepPw} onClick={submitKycStepUp}>{kycStepBusy ? 'Checking…' : 'Verify & view documents'}</Btn>
+      </Modal>
+      <Modal open={!!manualFor} onClose={() => setManualFor(null)} title="Verify manually — no documents">
+        <p className="text-sm text-slate-500 mb-3">You are verifying <b>{manualFor?.name}</b> without any submitted documents. This is restricted to the full admin, and the reason is written to the audit log.</p>
+        <Input label="Reason (required)" value={manualReason} onChange={e => setManualReason(e.target.value)} placeholder="e.g. Known customer — documents checked in person" />
+        <Btn variant="success" className="w-full mt-3" disabled={manualBusy} onClick={submitManualVerify}>{manualBusy ? 'Verifying…' : '✅ Verify manually'}</Btn>
+      </Modal>
       <Modal open={!!selTx} onClose={() => setSelTxId(null)} title="Transaction details">
         {selTx && (() => { const tu = db.users.find(u => u.id === selTx.userId); const dir = txDirection(selTx.category, selTx.amount); return (
           <div className="space-y-4">
@@ -945,6 +989,12 @@ const USER_SECTION_GROUPS = [
   ] },
 ] as const
 
+const registrationCountryLabel = (code?: string) => {
+  if (!code) return 'Not recorded'
+  const cc = code.toUpperCase()
+  try { return new (Intl as any).DisplayNames(['en'], { type: 'region' }).of(cc) + ' (' + cc + ')' } catch { return cc }
+}
+
 export function AdminUserPage() {
   const { userId } = useParams()
   const navigate = useNavigate()
@@ -1024,6 +1074,7 @@ export function AdminUserPage() {
                       <span className="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-extrabold">Level {u.level}</span>
                       <span className="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-extrabold capitalize">{u.status}</span>
                       <span className="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-extrabold">{u.kyc === 'verified' ? '✅ KYC verified' : u.kyc === 'pending' ? '⏳ KYC pending' : 'KYC unverified'}</span>
+                      {u.registrationCountry && <span className="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-extrabold">🌍 {registrationCountryLabel(u.registrationCountry)}</span>}
                       {u.role === 'admin' && <span className="px-2 py-0.5 rounded-full bg-amber-300 text-amber-900 text-[11px] font-extrabold capitalize">🛡️ Admin · {u.adminScope ?? 'full'}</span>}
                     </div>
                   </div>
@@ -1094,6 +1145,7 @@ export function AdminUserPage() {
                 <div className="flex justify-between items-center gap-3"><span className="text-slate-500">User ID</span><span className="flex items-center gap-1.5"><span className="font-bold font-mono text-[13px]">{u.id}</span><button onClick={() => copyTxId(u.id)} title="Copy user ID" className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-500/15 text-violet-600"><Copy size={12} /></button></span></div>
                 <div className="flex justify-between gap-3"><span className="text-slate-500">Phone</span><span className="font-bold">{u.phone}</span></div>
                 <div className="flex justify-between gap-3"><span className="text-slate-500">Email</span><span className="font-bold truncate">{u.email}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-slate-500">Registration country</span><span className="font-bold text-right">{registrationCountryLabel(u.registrationCountry)}</span></div>
               </div>
               {/* KYC status — data lives in the KYC Verification tab */}
               <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4 text-sm flex items-center justify-between gap-3">

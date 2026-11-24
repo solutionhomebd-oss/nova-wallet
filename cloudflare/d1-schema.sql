@@ -42,6 +42,7 @@ CREATE TABLE users (
   referral_code TEXT UNIQUE NOT NULL,
   referred_by TEXT REFERENCES users(id),
   two_fa_enabled INTEGER NOT NULL DEFAULT 0,
+  registration_country TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   CONSTRAINT no_self_referral CHECK (referred_by IS NULL OR referred_by <> id)
 );

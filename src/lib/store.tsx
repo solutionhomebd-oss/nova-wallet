@@ -145,7 +145,7 @@ interface Ctx {
   confirmLoanFee: (loanId: string) => Promise<void>
   decideLoan: (id: string, ok: boolean) => Promise<void>
   repayLoan: (loan: Loan, amount: number) => Promise<string | null>
-  submitKyc: (p: { docType: string; docNumber: string; docPhoto?: string; facePhoto?: string }) => Promise<string | null>; decideKyc: (userId: string, ok: boolean) => Promise<string | null>
+  submitKyc: (p: { docType: string; docNumber: string; docPhoto?: string; facePhoto?: string }) => Promise<string | null>; decideKyc: (userId: string, ok: boolean, reason?: string) => Promise<string | null>
   setUserStatus: (userId: string, status: User['status']) => void
   adjustBalance: (userId: string, amount: number, title: string, note?: string) => Promise<void>
   txHold: (txId: string) => Promise<string | null>
@@ -405,7 +405,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt } : {}),
     ...(su.adminScope ? { adminScope: su.adminScope } : {}),
     ...(su.pinFailCount !== undefined ? { pinFailCount: su.pinFailCount } : {}), ...(su.pinLockedUntil ? { pinLockedUntil: su.pinLockedUntil } : {}),
-    referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
+    referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', ...(su.registrationCountry ? { registrationCountry: su.registrationCountry } : {}), referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
     createdAt: su.createdAt || nowISO(), lastLogin: su.createdAt || nowISO(), sessions: [],
   })
   const mergeDirectoryInto = (d: DB, users: any[]) => {
@@ -435,6 +435,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (su.kycDocType) { existing.kycDocType = su.kycDocType; existing.kycDocNumber = su.kycDocNumber; existing.kycSubmittedAt = su.kycSubmittedAt }
         if (su.pinFailCount !== undefined) existing.pinFailCount = su.pinFailCount
         if (su.novaAddress) existing.novaAddress = su.novaAddress
+        if (su.registrationCountry) existing.registrationCountry = su.registrationCountry
         if (su.pinLockedUntil) existing.pinLockedUntil = su.pinLockedUntil; else delete existing.pinLockedUntil
         continue
       }
@@ -519,6 +520,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.emailVerified !== undefined) lu.emailVerified = state.profile.emailVerified
       if (state.profile.pinHash) lu.pinHash = state.profile.pinHash
       if (state.profile.novaAddress) lu.novaAddress = state.profile.novaAddress
+      if (state.profile.registrationCountry) lu.registrationCountry = state.profile.registrationCountry
       if (state.profile.cardWishlistJoined !== undefined) lu.cardWishlistJoined = state.profile.cardWishlistJoined
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
@@ -1479,14 +1481,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null
     } catch (e: any) { return e.message }
   }
-  const decideKyc: Ctx['decideKyc'] = async (userId2, ok) => {
+  const decideKyc: Ctx['decideKyc'] = async (userId2, ok, reason) => {
     const target = serverUidOf(userId2)
     if (!target) return 'That user is not on the server yet'
     // Optimistic badge first so the click registers instantly.
     mutate(d => { const u = d.users.find(x => x.id === userId2); if (u) u.kyc = ok ? 'verified' : 'unverified' })
     noteDecision('kyc:' + userId2, ok ? 'verified' : 'unverified')
     try {
-      const r = await apiPost('/v1/admin/kyc/decide', { userId: target, ok })
+      const r = await apiPost('/v1/admin/kyc/decide', { userId: target, ok, ...(reason ? { reason } : {}) })
       applyMoneyResult(r)
       mutate(d => {
         const u = d.users.find(x => x.id === userId2); if (!u) return

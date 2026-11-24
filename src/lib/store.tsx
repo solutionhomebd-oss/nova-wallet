@@ -405,7 +405,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt, ...(su.kycAutoChecks ? { kycAutoChecks: su.kycAutoChecks } : {}) } : {}),
     ...(su.adminScope ? { adminScope: su.adminScope } : {}),
     ...(su.pinFailCount !== undefined ? { pinFailCount: su.pinFailCount } : {}), ...(su.pinLockedUntil ? { pinLockedUntil: su.pinLockedUntil } : {}),
-    referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', ...(su.registrationCountry ? { registrationCountry: su.registrationCountry } : {}), referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
+    referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', ...(su.registrationCountry ? { registrationCountry: su.registrationCountry } : {}), ...(su.appBonusAt ? { appBonusAt: su.appBonusAt } : {}), referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
     createdAt: su.createdAt || nowISO(), lastLogin: su.createdAt || nowISO(), sessions: [],
   })
   const mergeDirectoryInto = (d: DB, users: any[]) => {
@@ -521,6 +521,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.pinHash) lu.pinHash = state.profile.pinHash
       if (state.profile.novaAddress) lu.novaAddress = state.profile.novaAddress
       if (state.profile.registrationCountry) lu.registrationCountry = state.profile.registrationCountry
+      if (state.profile.appBonusAt) lu.appBonusAt = state.profile.appBonusAt
       if (state.profile.cardWishlistJoined !== undefined) lu.cardWishlistJoined = state.profile.cardWishlistJoined
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id

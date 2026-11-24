@@ -420,6 +420,7 @@ async function loadState(db, uid, lite = false) {
       role: me.role, status: me.status, level: Number(me.level), referralCode: me.referral_code, emailVerified: Number(me.email_verified) === 1,
       pinHash: me.pin_hash || "", novaAddress: me.nova_address || "",
       ...(me.registration_country ? { registrationCountry: me.registration_country } : {}),
+      ...(me.app_bonus_at ? { appBonusAt: isoOf(me.app_bonus_at) } : {}),
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
       kyc: kycRow?.status ?? "unverified",
       cardWishlistJoined: !!wlRow,

@@ -1,5 +1,5 @@
-import { useId, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeftRight, Award, BadgePercent, Coins, Globe, Nfc, Snowflake, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
 import LogoMark from '../components/LogoMark'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
@@ -10,6 +10,7 @@ import { COIN_META, useMarket } from '../lib/market'
 import { Badge, Btn, Card, Empty, FeatureOff, Input, MaxBtn, Modal, Select, TxDirIcon , StepBar, StepUpField, WizardNav } from '../components/ui'
 import { fmtBDT, fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { PageHead, ResultModal, SuccessModal } from './Services'
+import { promptInstall } from '../lib/install'
 
 export function Level2GateModal({ open, onClose, feature }: { open: boolean; onClose: () => void; feature: string }) {
   const navigate = useNavigate()
@@ -135,7 +136,13 @@ const PLANS = [
   { days: 180, apy: 16, label: '180 days', note: 'Max return' },
 ]
 export function EarnPage() {
-  const { user, db, walletOf, stake, unstake, toast, earnInfo, addTicket, replyTicket } = useApp()
+  const { user, db, walletOf, stake, unstake, toast, earnInfo, addTicket, replyTicket, t } = useApp()
+  const location = useLocation()
+  useEffect(() => {
+    if (location.hash !== '#staking') return
+    const id = setTimeout(() => document.getElementById('staking')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+    return () => clearTimeout(id)
+  }, [location.hash])
   const [amount, setAmount] = useState(''); const [plan, setPlan] = useState(1)
   const [relReq, setRelReq] = useState<any>(null); const [relMsg, setRelMsg] = useState(''); const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null); const [errMsg, setErrMsg] = useState('')
   if (!user) return null
@@ -181,7 +188,32 @@ export function EarnPage() {
   }
   return (
     <div>
-      <PageHead title="Earn" sub="Stake USDT and earn daily interest. Unstake anytime (flexible) or at term." />
+      <PageHead title="Earn" sub="Rewards, staking and more ways to grow your balance." />
+      <h3 className="font-extrabold mb-3">{t('earn_grow')}</h3>
+      <div className="grid grid-cols-3 gap-2.5 mb-6">
+        <Link to="/crypto" className="block">
+          <Card className="p-4 h-full hover:border-violet-400 transition text-center">
+            <span className="text-2xl">₿</span>
+            <p className="font-extrabold text-sm mt-1.5">{t('act_crypto')}</p>
+            <p className="text-[11px] text-slate-400">{t('earn_crypto_sub')}</p>
+          </Card>
+        </Link>
+        <button onClick={() => document.getElementById('staking')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="block w-full">
+          <Card className="p-4 h-full hover:border-violet-400 transition text-center">
+            <span className="text-2xl">🌱</span>
+            <p className="font-extrabold text-sm mt-1.5">{t('act_staking')}</p>
+            <p className="text-[11px] text-slate-400">{t('earn_staking_sub')}</p>
+          </Card>
+        </button>
+        <Link to="/install" className="block">
+          <Card className="p-4 h-full hover:border-violet-400 transition text-center">
+            <span className="text-2xl">📲</span>
+            <p className="font-extrabold text-sm mt-1.5">{t('act_install')}</p>
+            <p className="text-[11px] text-slate-400">{t('earn_install_sub')}</p>
+            <span className="inline-block mt-2 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-600">{user.appBonusAt ? t('install_claimed') : '$2 bonus'}</span>
+          </Card>
+        </Link>
+      </div>
       <h3 className="font-extrabold mb-3">Rewards — earn free USDT</h3>
       <div className="grid grid-cols-2 gap-2.5 mb-6">
         {rewardOptions.map(o => (
@@ -195,7 +227,7 @@ export function EarnPage() {
           </Link>
         ))}
       </div>
-      <h3 className="font-extrabold mb-3">Staking</h3>
+      <h3 id="staking" className="font-extrabold mb-3 scroll-mt-24">Staking</h3>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Available</p><p className="font-extrabold mt-1">{fmtUSDT(availUsd)}</p></Card>
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Staked</p><p className="font-extrabold mt-1 text-violet-600">{usd(totalStaked)}</p></Card>
@@ -504,6 +536,55 @@ export function CardsPage() {
           <Btn className="w-full" disabled={joined || busy} onClick={notify}>{joined ? '✓ ' + t('cards_notified') : busy ? '…' : t('cards_notify')}</Btn>
         </Card>
       </div>
+    </div>
+  )
+}
+
+export function InstallPage() {
+  const { user, appInstalled, claimAppBonus, toast, t } = useApp()
+  const [claiming, setClaiming] = useState(false)
+  useEffect(() => {
+    const done = () => toast({ kind: 'success', title: t('install_done'), body: t('install_open_hint') })
+    window.addEventListener('appinstalled', done)
+    return () => window.removeEventListener('appinstalled', done)
+  }, [])
+  if (!user) return null
+  const claimed = !!user.appBonusAt
+  const install = async () => {
+    const r = await promptInstall()
+    if (r === 'unavailable') toast({ kind: 'info', title: t('install_unavailable') })
+  }
+  const claim = async () => { setClaiming(true); await claimAppBonus(); setClaiming(false) }
+  const stepDot = "shrink-0 w-6 h-6 rounded-full bg-violet-100 dark:bg-violet-500/15 text-violet-600 text-xs font-extrabold flex items-center justify-center"
+  return (
+    <div>
+      <PageHead title={t('act_install')} sub={t('install_body')} />
+      <Card className="p-6 text-center">
+        <span className="inline-block rounded-3xl bg-gradient-to-br from-violet-700 to-indigo-800 p-2 shadow-lg shadow-violet-700/30"><LogoMark size={52} /></span>
+        <p className="font-extrabold text-lg mt-3">{t('install_title')}</p>
+        <p className="text-sm text-slate-500 mt-1 leading-relaxed">{t('install_body')}</p>
+        <p className="mt-3 inline-block text-xs font-extrabold px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-600">🎁 $2 bonus</p>
+        {claimed ? (
+          <div className="mt-5 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 font-extrabold py-3.5 px-4">✓ {t('install_claimed')}</div>
+        ) : appInstalled ? (
+          <div>
+            <p className="mt-4 text-sm font-bold text-emerald-600">{t('install_done')}</p>
+            <Btn className="w-full py-3.5 mt-3" disabled={claiming} onClick={claim}>{claiming ? '…' : t('install_claim')}</Btn>
+          </div>
+        ) : (
+          <Btn className="w-full py-3.5 mt-5" onClick={install}>⬇ {t('install_now')}</Btn>
+        )}
+      </Card>
+      {!appInstalled && (
+        <Card className="p-5 mt-4">
+          <h3 className="font-extrabold mb-3">How to install</h3>
+          <ol className="space-y-3.5 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+            <li className="flex gap-2.5"><span className={stepDot}>1</span><span><b>Android (Chrome):</b> {t('install_how')}</span></li>
+            <li className="flex gap-2.5"><span className={stepDot}>2</span><span><b>iPhone (Safari):</b> {t('install_ios')}</span></li>
+            <li className="flex gap-2.5"><span className={stepDot}>3</span><span>{t('install_open_hint')}</span></li>
+          </ol>
+        </Card>
+      )}
     </div>
   )
 }

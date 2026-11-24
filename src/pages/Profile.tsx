@@ -301,9 +301,9 @@ export default function Profile() {
       </Card>
 
       <Card className="p-2 mt-4">
-        <button onClick={doInstall} className="w-full flex items-center gap-3 p-3.5 font-semibold text-[15px] hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-2xl text-left">
+        <button onClick={() => navigate('/install')} className="w-full flex items-center gap-3 p-3.5 font-semibold text-[15px] hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-2xl text-left">
           <span className="text-violet-600"><Download size={18} /></span> Install App
-          <span className="ml-auto text-sm font-bold text-violet-600">{appInstalled ? 'Installed ✓' : 'Install'}</span>
+          <span className="ml-auto text-sm font-bold text-violet-600">{user?.appBonusAt ? 'Claimed ✓' : appInstalled ? 'Installed ✓' : '$2 bonus'}</span>
         </button>
       </Card>
 

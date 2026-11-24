@@ -13,7 +13,7 @@ export interface User {
   pinFailCount?: number; pinLockedUntil?: string
   passwordHash: string; pinHash: string; role: Role; status: UserStatus; kyc: KycStatus
   referralCode: string
-  novaAddress?: string; registrationCountry?: string; cardWishlistJoined?: boolean; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
+  novaAddress?: string; registrationCountry?: string; appBonusAt?: string; cardWishlistJoined?: boolean; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
   /** Firebase UID once the account is linked to the backend (Phase 1+). */
   fbUid?: string
   /** RBAC scope for admin accounts (server-side, D1 users.admin_scope):

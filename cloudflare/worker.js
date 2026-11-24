@@ -421,6 +421,7 @@ async function loadState(db, uid, lite = false) {
     const rtRow = await db.prepare("SELECT COUNT(*) AS c FROM referrals WHERE referrer_id = ?").bind(uid).first();
     const reRow = await db.prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE user_id = ? AND category = 'referral' AND status = 'completed'").bind(uid).first();
     const hdRow = await db.prepare("SELECT id FROM deposits WHERE user_id = ? AND status = 'approved' LIMIT 1").bind(uid).first();
+    const dtRow = await db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM deposits WHERE user_id = ? AND status = 'approved'").bind(uid).first();
     const rlRows = await db.prepare("SELECT r.referred_id AS rid, r.created_at AS cat, p.full_name AS name, us.username AS username FROM referrals r JOIN users us ON us.id = r.referred_id LEFT JOIN user_profiles p ON p.user_id = us.id WHERE r.referrer_id = ? ORDER BY r.created_at DESC LIMIT 50").bind(uid).all();
     const ldRows = await db.prepare("SELECT u.id AS uid, p.full_name AS name, u.username AS username, COUNT(r.id) AS cnt, COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.user_id = u.id AND t.category = 'referral' AND t.status = 'completed'), 0) AS earned FROM users u JOIN referrals r ON r.referrer_id = u.id LEFT JOIN user_profiles p ON p.user_id = u.id WHERE u.role = 'user' GROUP BY u.id ORDER BY earned DESC, cnt DESC LIMIT 5").all();
     refStats = {
@@ -428,6 +429,7 @@ async function loadState(db, uid, lite = false) {
       total: Number(rtRow?.c || 0),
       earned: Number(reRow?.total || 0),
       hasDeposited: !!hdRow,
+      depositTotal: Number(dtRow?.t || 0),
       list: rlRows.results.map((r) => ({ id: r.rid, name: r.name || "", username: r.username, createdAt: isoOf(r.cat) })),
       leaders: ldRows.results.map((r) => ({ id: r.uid, name: r.name || r.username || "", count: Number(r.cnt || 0), earnedBdt: Number(r.earned || 0) })),
     };
@@ -441,7 +443,7 @@ async function loadState(db, uid, lite = false) {
       ...(me.registration_country ? { registrationCountry: me.registration_country } : {}),
       ...(me.app_bonus_at ? { appBonusAt: isoOf(me.app_bonus_at) } : {}),
       ...(me.admin_scope ? { adminScope: me.admin_scope } : {}),
-      ...(refStats ? { referralCount: refStats.count, referralTotal: refStats.total, referralEarningsBdt: refStats.earned, hasDeposited: refStats.hasDeposited } : {}),
+      ...(refStats ? { referralCount: refStats.count, referralTotal: refStats.total, referralEarningsBdt: refStats.earned, hasDeposited: refStats.hasDeposited, depositTotalBdt: refStats.depositTotal } : {}),
       kyc: kycRow?.status ?? "unverified",
       cardWishlistJoined: !!wlRow,
       ...(kycRow ? { kycDocType: kycRow.doc_type, kycDocNumber: kycRow.doc_number, kycSubmittedAt: isoOf(kycRow.created_at) } : {}),
@@ -909,7 +911,7 @@ async function handleWithdraw(request, env, auth, body) {
   if (!me) return json(request, { error: "Account not found." }, 404);
   if (me.status === "frozen") return json(request, { error: "Your wallet is frozen. Contact support." }, 400);
   if (me.status === "suspended") return json(request, { error: "Your account is suspended. Contact support." }, 400);
-  if (Number(me.level) < 2) return json(request, { error: "Cash out needs a Level 2 account. Make a deposit or refer 50 friends to unlock Level 2.", code: "level_required" }, 400);
+  if (Number(me.level) < 2) return json(request, { error: "Cash out needs a Level 2 account. Reach 82.64 USDT in total deposits or refer 50 friends to unlock Level 2.", code: "level_required" }, 400);
   const settings = await getSettings(db);
   const disc = await feeDiscount(db, Number(me.level));
   const fee = Math.round(amount * (settings.cashoutPct * (1 - disc / 100)) / 100);
@@ -938,7 +940,7 @@ async function handleDirectWithdraw(request, env, auth, body) {
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);
   const me = await getUserRow(db, auth.uid);
   if (!me) return json(request, { error: "Account not found." }, 404);
-  if (Number(me.level) < 2) return json(request, { error: "Payment needs a Level 2 account. Make a deposit or refer 50 friends to unlock Level 2.", code: "level_required" }, 400);
+  if (Number(me.level) < 2) return json(request, { error: "Payment needs a Level 2 account. Reach 82.64 USDT in total deposits or refer 50 friends to unlock Level 2.", code: "level_required" }, 400);
   if (me.status === "frozen") return json(request, { error: "Your wallet is frozen. Contact support." }, 400);
   if (me.status === "suspended") return json(request, { error: "Your account is suspended. Contact support." }, 400);
   const suErr = await stepUpGate(db, auth.uid, amount);
@@ -1206,6 +1208,22 @@ async function handleEarnClaim(request, env, auth, body) {
   const { kind, amount, title } = body;
   const cap = EARN_CAPS[kind];
   if (!cap) return json(request, { error: "Unknown reward kind." }, 400);
+  if (kind === "task" && body.taskId) {
+    const VERIFIED_TASKS = { first_deposit: { reward: 25, title: "Task reward: Make your first deposit" }, install_app: { reward: 15, title: "Task reward: Install the NovaWallet app" } };
+    const vt = VERIFIED_TASKS[body.taskId];
+    if (vt) {
+      if (Number(amount) !== vt.reward || String(title || "") !== vt.title) return json(request, { error: "Invalid task claim." }, 400);
+      const dupT = await db.prepare("SELECT COUNT(*) AS c FROM transactions WHERE user_id = ? AND category = 'earn' AND title = ?").bind(auth.uid, vt.title).first();
+      if (Number(dupT?.c ?? 0) > 0) return json(request, { error: "Task already completed." }, 400);
+      if (body.taskId === "first_deposit") {
+        const dep = await db.prepare("SELECT id FROM deposits WHERE user_id = ? AND status = 'approved' LIMIT 1").bind(auth.uid).first();
+        if (!dep) return json(request, { error: "Make your first deposit first \u2014 this task unlocks once a deposit is approved." }, 400);
+      } else {
+        const uu = await db.prepare("SELECT app_bonus_at AS ab FROM users WHERE id = ?").bind(auth.uid).first();
+        if (!uu?.ab) return json(request, { error: "Install the app and claim your $2 bonus first." }, 400);
+      }
+    }
+  }
   if (badAmount(amount) || amount > cap.max) return json(request, { error: "Invalid reward amount." }, 400);
   const dhakaDay = new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
   const dayStart = new Date(dhakaDay + "T00:00:00+06:00").toISOString();
@@ -1342,8 +1360,8 @@ async function maybeAutoLevel2(db, env, userId, reason) {
     if (!u || u.role === "admin" || Number(u.level) >= 2) return false;
     await db.prepare("UPDATE users SET level = 2 WHERE id = ?").bind(userId).run();
     await auditLog(db, { uid: userId }, "level.auto_upgrade", "AUTO: " + userId + " -> Level 2 (" + reason + ")");
-    await notifyServer(db, userId, "level", "\u{1F389} You reached Level 2!", reason === "deposit" ? "Your first deposit was approved \u2014 your account is now Level 2. Cash Out, Payment and higher limits are active right away." : "You completed 50 referrals \u2014 your account is now Level 2. Cash Out, Payment and higher limits are active right away.", "/level");
-    await sendUserEmail(env, db, userId, "account", "Your NovaWallet level was upgraded \u2014 you are now Level 2 \u{1F389}", "Level upgraded", [reason === "deposit" ? "Great news \u2014 your first deposit was approved, so your account has been upgraded to Level 2." : "Great news \u2014 you completed 50 referrals, so your account has been upgraded to Level 2.", "Your higher limits and benefits are active right away."], "Level 2");
+    await notifyServer(db, userId, "level", "\u{1F389} You reached Level 2!", reason === "deposit" ? "Your approved deposits reached 82.64 USDT (10,000 BDT) \u2014 your account is now Level 2. Cash Out, Payment and higher limits are active right away." : "You completed 50 referrals \u2014 your account is now Level 2. Cash Out, Payment and higher limits are active right away.", "/level");
+    await sendUserEmail(env, db, userId, "account", "Your NovaWallet level was upgraded \u2014 you are now Level 2 \u{1F389}", "Level upgraded", [reason === "deposit" ? "Great news \u2014 your approved deposits reached 82.64 USDT (10,000 BDT), so your account has been upgraded to Level 2." : "Great news \u2014 you completed 50 referrals, so your account has been upgraded to Level 2.", "Your higher limits and benefits are active right away."], "Level 2");
     return true;
   } catch { return false; }
 }
@@ -1849,6 +1867,76 @@ async function handleAdminUserNotes(request, env, auth, body) {
   return json(request, { ok: true });
 }
 
+// DELETE USER (full admin only): removes the Firebase login FIRST (if that
+// fails, nothing is deleted), then every D1 trace of the account — profile,
+// wallet, money history, chats, KYC, referrals, sessions, logs — children
+// before parents so the foreign keys hold.
+async function handleAdminDeleteUser(request, env, auth, body) {
+  if (auth.scope !== "full") return json(request, { error: "scope_denied" }, 403);
+  const db = env.DB;
+  const targetId = String(body.userId || "");
+  if (!targetId) return json(request, { error: "userId required" }, 400);
+  if (targetId === auth.uid) return json(request, { error: "You cannot delete your own account." }, 400);
+  const t = await db.prepare("SELECT id, email, username, role FROM users WHERE id = ?").bind(targetId).first();
+  if (!t) return json(request, { error: "User not found." }, 404);
+  if (t.role === "admin") return json(request, { error: "Admin accounts cannot be deleted." }, 400);
+  if (env.FIREBASE_SA) {
+    try {
+      const tok = await firebaseAdminToken(env);
+      const r = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:delete", { method: "POST", headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json" }, body: JSON.stringify({ localId: targetId }) });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        const msg = String(j?.error?.message || ("http_" + r.status));
+        if (!msg.includes("USER_NOT_FOUND")) return json(request, { error: "Could not delete the login (" + msg + "). Nothing was deleted." }, 502);
+      }
+    } catch (e) {
+      return json(request, { error: "Could not delete the login (" + String(e?.message || e) + "). Nothing was deleted." }, 502);
+    }
+  }
+  const U = targetId, E = t.email;
+  const d = (sql, ...b) => db.prepare(sql).bind(...b);
+  await db.batch([
+    d("DELETE FROM ticket_messages WHERE ticket_id IN (SELECT id FROM support_tickets WHERE user_id = ?)", U),
+    d("DELETE FROM referral_commissions WHERE referral_id IN (SELECT id FROM referrals WHERE referrer_id = ? OR referred_id = ?) OR source_transaction IN (SELECT id FROM transactions WHERE user_id = ?)", U, U, U),
+    d("DELETE FROM loan_repayments WHERE loan_id IN (SELECT id FROM loans WHERE user_id = ?) OR transaction_id IN (SELECT id FROM transactions WHERE user_id = ?)", U, U),
+    d("DELETE FROM transaction_ledger WHERE transaction_id IN (SELECT id FROM transactions WHERE user_id = ?) OR transaction_id IN (SELECT public_id FROM transactions WHERE user_id = ?)", U, U),
+    d("DELETE FROM transfers WHERE from_user = ? OR to_user = ?", U, U),
+    d("DELETE FROM support_tickets WHERE user_id = ?", U),
+    d("DELETE FROM notifications WHERE user_id = ?", U),
+    d("DELETE FROM deposits WHERE user_id = ?", U),
+    d("DELETE FROM withdrawals WHERE user_id = ?", U),
+    d("DELETE FROM stakes WHERE user_id = ?", U),
+    d("DELETE FROM kyc_submissions WHERE user_id = ?", U),
+    d("DELETE FROM level_upgrade_requests WHERE user_id = ?", U),
+    d("DELETE FROM card_wishlist WHERE user_id = ?", U),
+    d("DELETE FROM watchlists WHERE user_id = ?", U),
+    d("DELETE FROM payment_methods WHERE user_id = ?", U),
+    d("DELETE FROM user_payment_methods WHERE user_id = ?", U),
+    d("DELETE FROM push_subscriptions WHERE user_id = ?", U),
+    d("DELETE FROM step_up_grants WHERE user_id = ?", U),
+    d("DELETE FROM user_sessions WHERE user_id = ?", U),
+    d("DELETE FROM user_email_prefs WHERE user_id = ?", U),
+    d("DELETE FROM email_changes WHERE user_id = ?", U),
+    d("DELETE FROM client_errors WHERE user_id = ?", U),
+    d("DELETE FROM loans WHERE user_id = ?", U),
+    d("DELETE FROM loan_applications WHERE user_id = ?", U),
+  ]);
+  await db.batch([
+    d("DELETE FROM referrals WHERE referrer_id = ? OR referred_id = ?", U, U),
+    d("DELETE FROM audit_logs WHERE actor = ?", U),
+    d("DELETE FROM admin_users WHERE user_id = ?", U),
+    d("DELETE FROM email_log WHERE user_id = ? OR to_email = ?", U, E),
+    d("DELETE FROM password_otps WHERE user_id = ? OR email = ?", U, E),
+    d("DELETE FROM email_verifications WHERE email = ?", E),
+    d("DELETE FROM transactions WHERE user_id = ?", U),
+    d("DELETE FROM wallet_balances WHERE wallet_id IN (SELECT id FROM wallets WHERE user_id = ?)", U),
+    d("DELETE FROM wallets WHERE user_id = ?", U),
+    d("DELETE FROM user_profiles WHERE user_id = ?", U),
+    d("DELETE FROM users WHERE id = ?", U),
+  ]);
+  await auditLog(db, auth, "user.delete", "Deleted user " + t.username + " (" + E + ") — login + all data removed");
+  return json(request, { ok: true });
+}
 async function handleAdminUserMessage(request, env, auth, body) {
   const db = env.DB;
   const targetUid = String(body.userId || "");
@@ -1909,7 +1997,7 @@ async function handleLevelRequest(request, env, auth, body) {
 // persist server-side and reach every device; mirrors the app seed.
 const LEVEL_DEFAULTS = [
   { level: 1, name: 'Level 1', tagline: 'Start your wallet journey', dailyLimit: 25000, monthlyLimit: 200000, loanLimit: 10000, depositRequired: 0, feeDiscountPct: 0, requirement: 'Default for every new account', gradient: 'from-slate-500 to-slate-700' },
-  { level: 2, name: 'Level 2', tagline: 'For verified everyday users', dailyLimit: 50000, monthlyLimit: 500000, loanLimit: 30000, depositRequired: 0, feeDiscountPct: 5, requirement: 'First deposit OR 50 referrals', gradient: 'from-slate-400 to-slate-600' },
+  { level: 2, name: 'Level 2', tagline: 'For verified everyday users', dailyLimit: 50000, monthlyLimit: 500000, loanLimit: 30000, depositRequired: 10000, feeDiscountPct: 5, requirement: 'Total deposits 82.64 USDT OR 50 referrals', gradient: 'from-slate-400 to-slate-600' },
   { level: 3, name: 'Level 3', tagline: 'Higher limits, lower fees', dailyLimit: 100000, monthlyLimit: 1000000, loanLimit: 60000, depositRequired: 50000, feeDiscountPct: 10, requirement: 'KYC verified + 20 completed transactions', gradient: 'from-amber-500 to-yellow-600' },
   { level: 4, name: 'Level 4', tagline: 'Maximum limits, priority support', dailyLimit: 250000, monthlyLimit: 2500000, loanLimit: 100000, depositRequired: 200000, feeDiscountPct: 20, requirement: 'KYC verified + 50 transactions + admin review', gradient: 'from-violet-600 to-indigo-700' },
 ];
@@ -2552,7 +2640,10 @@ async function handleDecideDeposit(request, env, auth, body) {
     }
   }
   try { await db.batch(stmts); } catch (e) { return json(request, { error: "Decision failed: " + String(e?.message || e) }, 500); }
-  if (ok) await maybeAutoLevel2(db, env, dep.user_id, "deposit");
+  if (ok) {
+    const tot = await db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM deposits WHERE user_id = ? AND status = 'approved'").bind(dep.user_id).first();
+    if (Number(tot?.t || 0) >= 10000) await maybeAutoLevel2(db, env, dep.user_id, "deposit");
+  }
   if (bonusGranted > 0) await auditLog(db, auth, "deposit.bonus", dep.id + " · first deposit · bonus +" + bonusGranted);
   await notifyServer(db, dep.user_id, "deposit", ok ? "Deposit approved" : "Deposit rejected", ok ? "Your deposit of " + dep.amount + " was approved and credited." + (bonusGranted > 0 ? " 🎁 First-deposit bonus: +" + bonusGranted + " credited — you received double!" : "") : "Your deposit of " + dep.amount + " was rejected. Please check the details and try again.", null);
   await sendUserEmail(env, db, dep.user_id, "tx", ok ? "Deposit approved — " + fmtTk(dep.amount) + " credited" : "Deposit not approved", ok ? "Deposit approved" : "Deposit not approved", [ok ? "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " has been approved and credited to your wallet." + (bonusGranted > 0 ? " You also received a first-deposit bonus of " + fmtTk(bonusGranted) + "." : "") : "Your deposit of " + fmtTk(dep.amount) + " via " + dep.method + " was not approved, so nothing was credited. Please check the details and try again, or contact support."], ok ? fmtTk(Number(dep.amount) + bonusGranted) + " credited" : undefined);
@@ -3513,6 +3604,7 @@ export default {
           case "/v1/cards/wishlist": return await handleCardWishlistJoin(request, env, auth, body);
           case "/v1/admin/user-notes": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserNotes(request, env, auth, body);
           case "/v1/admin/user-message": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminUserMessage(request, env, auth, body);
+          case "/v1/admin/delete-user": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminDeleteUser(request, env, auth, body);
           case "/v1/admin/sessions/revoke": if (auth.role !== "admin") return json(request, { error: "admin_only" }, 403); return await handleAdminSessionRevoke(request, env, auth, body);
           case "/v1/tickets/delete": return await handleTicketDelete(request, env, auth, body);
           case "/v1/tickets/resolve": return await handleTicketResolve(request, env, auth, body);

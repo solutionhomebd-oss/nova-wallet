@@ -523,7 +523,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.registrationCountry) lu.registrationCountry = state.profile.registrationCountry
       if (state.profile.appBonusAt) lu.appBonusAt = state.profile.appBonusAt
       if (state.profile.cardWishlistJoined !== undefined) lu.cardWishlistJoined = state.profile.cardWishlistJoined
-      if (state.profile.referralCount !== undefined) { lu.referralCount = state.profile.referralCount; lu.referralTotal = state.profile.referralTotal ?? state.profile.referralCount; lu.referralEarningsBdt = state.profile.referralEarningsBdt ?? 0; lu.hasDeposited = !!state.profile.hasDeposited }
+      if (state.profile.referralCount !== undefined) { lu.referralCount = state.profile.referralCount; lu.referralTotal = state.profile.referralTotal ?? state.profile.referralCount; lu.referralEarningsBdt = state.profile.referralEarningsBdt ?? 0; lu.hasDeposited = !!state.profile.hasDeposited; lu.depositTotalBdt = state.profile.depositTotalBdt ?? 0 }
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
@@ -1202,7 +1202,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   const directWithdraw: Ctx['directWithdraw'] = async (p) => {
     if (!user) return 'Not signed in'
-    if (user.level < 2) return 'Payment needs a Level 2 account. Make a deposit or refer 50 friends to unlock Level 2.'
+    if (user.level < 2) return 'Payment needs a Level 2 account. Reach 82.64 USDT in total deposits or refer 50 friends to unlock Level 2.'
     if (badAmount(p.amount)) return 'Enter a valid amount.'
     if (user.status === 'frozen') return 'Your wallet is frozen. Contact support.'
     const lim = limitError(user, p.amount); if (lim) return lim
@@ -1328,8 +1328,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null
     } catch (e: any) { return e.message }
   }
-  const claimEarn = async (kind: string, amount: number, title: string): Promise<string | null> => {
-    try { const r = await apiPost('/v1/earn/claim', { kind, amount, title }); applyMoneyResult(r); return null }
+  const claimEarn = async (kind: string, amount: number, title: string, taskId?: string): Promise<string | null> => {
+    try { const r = await apiPost('/v1/earn/claim', { kind, amount, title, ...(taskId ? { taskId } : {}) }); applyMoneyResult(r); return null }
     catch (e: any) { return e.message }
   }
   const earnInfo: Ctx['earnInfo'] = () => {
@@ -1420,7 +1420,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       box.credit = { amount: task.reward, title: 'Task reward: ' + task.title }
       out = { amount: task.reward }
     })
-    { const c = box.credit; if (c) { const err = await claimEarn('task', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
+    { const c = box.credit; if (c) { const err = await claimEarn('task', c.amount, c.title, taskId); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
   const submitQuiz: Ctx['submitQuiz'] = async (correct) => {

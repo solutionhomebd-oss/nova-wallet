@@ -10,6 +10,8 @@ export const QUIZ_PER_CORRECT = 4
 
 export interface EarnTask { id: string; icon: string; title: string; desc: string; reward: number }
 export const EARN_TASKS: EarnTask[] = [
+  { id: 'first_deposit', icon: '💰', title: 'Make your first deposit', desc: 'Add money and get it approved — counts once', reward: 25 },
+  { id: 'install_app', icon: '📲', title: 'Install the NovaWallet app', desc: 'Install the app and claim your $2 install bonus', reward: 15 },
   { id: 'yt', icon: '▶️', title: 'Subscribe on YouTube', desc: 'Subscribe to the NovaWallet YouTube channel', reward: 15 },
   { id: 'tg', icon: '✈️', title: 'Join Telegram community', desc: 'Join our Telegram channel for news and offers', reward: 10 },
   { id: 'fb', icon: '👍', title: 'Follow on Facebook', desc: 'Follow the NovaWallet Facebook page', reward: 10 },

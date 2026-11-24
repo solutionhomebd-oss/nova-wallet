@@ -490,6 +490,9 @@ export function LevelPage() {
   const link = `${location.origin}${import.meta.env.BASE_URL}register?ref=${user.referralCode}`
   const copy = (tx: string, l: string) => { navigator.clipboard?.writeText(tx); toast({ kind: 'success', title: l + ' copied' }) }
   const pct = Math.min(100, Math.round(refCount / 50 * 100))
+  const depTotal = user.depositTotalBdt ?? 0
+  const depPct = Math.min(100, Math.round(depTotal / 10000 * 100))
+  const bonusPct = db.settings.firstDepositBonusPct ?? 100
   return (
     <div>
       <PageHead title="My Level & Referrals" sub="Your account level, unlock progress and referral rewards" />
@@ -503,17 +506,26 @@ export function LevelPage() {
         </div>
       </div>
 
+      {!user.hasDeposited && bonusPct > 0 && (
+        <div className="rounded-[28px] bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 text-white p-5 mt-4 shadow-xl shadow-orange-500/20">
+          <p className="font-extrabold text-lg">🎁 First deposit bonus — {bonusPct}% extra{bonusPct === 100 ? ' (2x!)' : ''}</p>
+          <p className="text-sm text-white/90 mt-1">Deposit any amount and we match it with a {bonusPct}% bonus the moment it is approved{bonusPct === 100 ? ' — deposit 50, receive 100 total' : ''}. Every deposit also counts toward Level 2.</p>
+          <Btn className="mt-3 !bg-white !text-orange-600" onClick={() => navigate('/add')}>Add Money</Btn>
+        </div>
+      )}
+
       {user.level < 2 ? (
         <Card className="p-5 mt-4">
           <p className="font-extrabold flex items-center gap-2"><Award size={18} className="text-violet-600" /> Unlock Level 2 — pick either way</p>
           <p className="text-xs text-slate-500 mt-1">Level 2 unlocks automatically the moment either condition is met. Cash Out and Payment need Level 2.</p>
           <div className="flex items-center gap-3 mt-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4">
-            {user.hasDeposited ? <CheckCircle2 size={22} className="text-emerald-500 shrink-0" /> : <Wallet size={22} className="text-slate-400 shrink-0" />}
+            {depTotal >= 10000 ? <CheckCircle2 size={22} className="text-emerald-500 shrink-0" /> : <Wallet size={22} className="text-slate-400 shrink-0" />}
             <div className="flex-1">
-              <p className="font-bold text-sm">Make your first deposit</p>
-              <p className="text-xs text-slate-500">{user.hasDeposited ? 'Done — a deposit is already approved on your account.' : 'Any amount — the first approved deposit unlocks Level 2 instantly.'}</p>
+              <p className="font-bold text-sm">Deposit 82.64 USDT in total</p>
+              <p className="text-xs text-slate-500">{fmtUSDT(depTotal / db.settings.bdtPerUsd)} of 82.64 USDT deposited{depTotal > 0 && depTotal < 10000 ? ' — ' + fmtUSDT((10000 - depTotal) / db.settings.bdtPerUsd) + ' to go' : ''}</p>
+              <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 mt-2 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 transition-all" style={{ width: depPct + '%' }} /></div>
             </div>
-            {!user.hasDeposited && <Btn onClick={() => navigate('/add')}>Add Money</Btn>}
+            <Btn onClick={() => navigate('/add')}>Add Money</Btn>
           </div>
           <div className="flex items-center gap-3 mt-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4">
             <HandCoins size={22} className="text-slate-400 shrink-0" />

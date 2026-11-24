@@ -1,5 +1,17 @@
 User-agent: *
 Allow: /
 Disallow: /admin
+Disallow: /profile
+Disallow: /earn
+Disallow: /add
+Disallow: /cashout
+Disallow: /send
+Disallow: /payment
+Disallow: /level
+Disallow: /referral
+Disallow: /loan
+Disallow: /cards
+Disallow: /transactions
+Disallow: /install
 
 Sitemap: https://www.novawallet.pp.ua/sitemap.xml

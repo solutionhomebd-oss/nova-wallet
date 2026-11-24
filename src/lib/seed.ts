@@ -7,7 +7,7 @@ export const DEFAULT_PAY_METHODS = [
 
 export const DEFAULT_LEVELS: LevelDef[] = [
   { level: 1, name: 'Level 1', tagline: 'Start your wallet journey', dailyLimit: 25000, monthlyLimit: 200000, loanLimit: 10000, depositRequired: 0, feeDiscountPct: 0, requirement: 'Default for every new account', gradient: 'from-slate-500 to-slate-700' },
-  { level: 2, name: 'Level 2', tagline: 'For verified everyday users', dailyLimit: 50000, monthlyLimit: 500000, loanLimit: 30000, depositRequired: 0, feeDiscountPct: 5, requirement: 'First deposit OR 50 referrals', gradient: 'from-slate-400 to-slate-600' },
+  { level: 2, name: 'Level 2', tagline: 'For verified everyday users', dailyLimit: 50000, monthlyLimit: 500000, loanLimit: 30000, depositRequired: 10000, feeDiscountPct: 5, requirement: 'Total deposits 82.64 USDT OR 50 referrals', gradient: 'from-slate-400 to-slate-600' },
   { level: 3, name: 'Level 3', tagline: 'Higher limits, lower fees', dailyLimit: 100000, monthlyLimit: 1000000, loanLimit: 60000, depositRequired: 50000, feeDiscountPct: 10, requirement: 'KYC verified + 20 completed transactions', gradient: 'from-amber-500 to-yellow-600' },
   { level: 4, name: 'Level 4', tagline: 'Maximum limits, priority support', dailyLimit: 250000, monthlyLimit: 2500000, loanLimit: 100000, depositRequired: 200000, feeDiscountPct: 20, requirement: 'KYC verified + 50 transactions + admin review', gradient: 'from-violet-600 to-indigo-700' },
 ]

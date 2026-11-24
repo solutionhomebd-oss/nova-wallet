@@ -341,7 +341,7 @@ export default function Profile() {
 
       <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <Modal open={modal === 'levels'} onClose={() => setModal(null)} title={t('account_levels')}>
-        <ModalDesc>Higher levels unlock bigger daily and loan limits with lower fees. Level 2 unlocks automatically with your first approved deposit or 50 referrals; Levels 3–4 are reviewed by an admin.</ModalDesc>
+        <ModalDesc>Higher levels unlock bigger daily and loan limits with lower fees. Level 2 unlocks automatically at 82.64 USDT in total deposits or 50 referrals; Levels 3–4 are reviewed by an admin.</ModalDesc>
         <div className="space-y-2.5">
           {db.levels.map(l => {
             const isCurrent = l.level === user.level
@@ -369,7 +369,7 @@ export default function Profile() {
                 )}
                 {isNext && l.level === 2 && (
                   <div className="mt-3 rounded-2xl bg-violet-50 dark:bg-violet-500/10 p-3.5">
-                    <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">🔓 Level 2 unlocks automatically — no request needed. Make your first deposit (any amount) or complete 50 referrals.</p>
+                    <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">🔓 Level 2 unlocks automatically — no request needed. Reach 82.64 USDT in total deposits or complete 50 referrals.</p>
                     <Btn variant="outline" className="w-full mt-2.5" onClick={() => { setModal(null); navigate('/level') }}>Track my progress</Btn>
                   </div>
                 )}

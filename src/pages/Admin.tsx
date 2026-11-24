@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowLeftRight, Bell, Check, CheckCheck, Copy, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Search, Send, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Wallet, X, HandCoins, Gift, ScrollText, Loader2, Mail, Tag, History, AlertTriangle, Smartphone } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Bell, Check, CheckCheck, Copy, Download, LayoutDashboard, Megaphone, Menu, MessageCircle, Search, Send, Lock, Pause, Play, RotateCcw, Settings as SettingsIcon, ShieldCheck, Wallet, X, HandCoins, Gift, ScrollText, Loader2, Mail, Tag, History, AlertTriangle, Smartphone, Trash2 } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { apiGet, apiPost } from '../lib/api'
@@ -1024,6 +1024,9 @@ const USER_SECTION_GROUPS = [
     { id: 'referrals', label: 'Referrals', icon: Gift },
     { id: 'activity', label: 'Activity log', icon: History },
   ] },
+  { label: 'Control', items: [
+    { id: 'control', label: 'Delete user', icon: Trash2 },
+  ] },
 ] as const
 
 const registrationCountryLabel = (code?: string) => {
@@ -1054,6 +1057,7 @@ export function AdminUserPage() {
   const [mSym, setMSym] = useState('BTC'); const [mSide, setMSide] = useState<'buy' | 'sell'>('buy'); const [mTradeAmt, setMTradeAmt] = useState('')
   const [mClearArm, setMClearArm] = useState(false)
   const [mNewPin, setMNewPin] = useState(''); const [mPinArm, setMPinArm] = useState(false); const [mPinBusy, setMPinBusy] = useState(false)
+  const [delText, setDelText] = useState(''); const [delBusy, setDelBusy] = useState(false)
   const u = db.users.find(x => x.id === userId) ?? null
   useEffect(() => { setMLoanLimit(u?.loanLimitOverride ? String(Math.round(u.loanLimitOverride / db.settings.bdtPerUsd * 100) / 100) : '') }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
   const copyTxId = async (id: string) => { try { await navigator.clipboard.writeText(id); toast({ kind: 'success', title: 'Copied', body: id }) } catch { toast({ kind: 'error', title: 'Copy failed', body: id }) } }
@@ -1516,6 +1520,20 @@ export function AdminUserPage() {
                     {a.detail ? <p className="text-xs text-slate-400 mt-1 break-words">{a.detail}</p> : null}
                   </div>
                 ))}
+              </div>
+            )}
+            {section === 'control' && (
+              <div className="rounded-3xl border border-red-200 dark:border-red-500/30 bg-red-50/60 dark:bg-red-500/5 p-5">
+                <p className="font-extrabold text-red-600 flex items-center gap-2"><Trash2 size={17} /> Delete this user</p>
+                <p className="text-sm text-slate-500 mt-2 leading-relaxed">This permanently deletes the account everywhere: the login (Firebase Auth), profile, wallet and balances, all transactions, deposits and withdrawals, loans and stakes, KYC documents, support chats, referrals, sessions and logs. <b>This cannot be undone.</b></p>
+                {u.role === 'admin' ? <p className="text-sm font-bold text-red-600 mt-3">Admin accounts cannot be deleted.</p>
+                : u.id === user.id ? <p className="text-sm font-bold text-red-600 mt-3">You cannot delete your own account.</p>
+                : myScope !== 'full' ? <p className="text-sm font-bold text-red-600 mt-3">Only the full admin can delete users.</p>
+                : (<>
+                  <p className="text-sm font-bold mt-4">Type the username <span className="font-mono">{u.username}</span> to confirm:</p>
+                  <input value={delText} onChange={e => setDelText(e.target.value)} placeholder={u.username} className="mt-2 w-full rounded-2xl border border-red-200 dark:border-red-500/30 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-bold outline-none focus:ring-2 ring-red-400" />
+                  <Btn variant="danger" className="w-full mt-3" disabled={delBusy || delText.trim() !== u.username} onClick={async () => { setDelBusy(true); try { await apiPost('/v1/admin/delete-user', { userId: suidOf(u) }); toast({ kind: 'success', title: 'User deleted', body: u.name + ' (' + u.username + ') and all their data were removed.' }); navigate('/admin?tab=users') } catch (e: any) { toast({ kind: 'error', title: e.message || 'Delete failed' }); setDelBusy(false) } }}>{delBusy ? <Loader2 size={16} className="animate-spin" /> : <><Trash2 size={15} /> Delete user permanently</>}</Btn>
+                </>)}
               </div>
             )}
 

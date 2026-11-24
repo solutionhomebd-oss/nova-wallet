@@ -18,7 +18,7 @@ export function Level2GateModal({ open, onClose, feature }: { open: boolean; onC
       <div className="text-center">
         <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-violet-600 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-violet-600/30 mb-3"><Award size={30} /></div>
         <p className="font-extrabold text-lg">Upgrade to Level 2</p>
-        <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{feature} is available on <b className="text-slate-700 dark:text-slate-200">Level 2</b> accounts and above. Your account is currently <b className="text-slate-700 dark:text-slate-200">Level 1</b>. Level 2 unlocks automatically — make your first deposit (any amount) or complete 50 referrals.</p>
+        <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{feature} is available on <b className="text-slate-700 dark:text-slate-200">Level 2</b> accounts and above. Your account is currently <b className="text-slate-700 dark:text-slate-200">Level 1</b>. Level 2 unlocks automatically — reach 82.64 USDT in total deposits or complete 50 referrals.</p>
       </div>
       <div className="flex gap-2.5 mt-5">
         <Btn variant="outline" className="flex-1 py-3.5" onClick={onClose}>Cancel</Btn>
@@ -77,7 +77,7 @@ export function DirectWithdraw() {
       {user.level < 2 && (
         <div className="rounded-2xl border border-amber-300/70 bg-amber-50 dark:bg-amber-500/10 p-4 mb-4 flex items-center gap-3">
           <Award size={20} className="text-amber-500 shrink-0" />
-          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Payment needs Level 2. It unlocks automatically with your first deposit or 50 referrals.</p>
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Payment needs Level 2. It unlocks automatically at 82.64 USDT in total deposits or 50 referrals.</p>
           <Btn variant="outline" onClick={() => navigate('/level')}>Unlock</Btn>
         </div>
       )}

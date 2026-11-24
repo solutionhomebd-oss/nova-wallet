@@ -92,6 +92,12 @@ export function AddMoney() {
   return (
     <div>
       <PageHead title={t('add_title')} sub={t('add_sub')} />
+      {firstDep && (
+        <div className="rounded-[28px] bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 text-white p-5 mb-4 shadow-xl shadow-orange-500/20">
+          <p className="font-extrabold text-lg">🎁 First deposit? Get {bonusPct}% extra{bonusPct === 100 ? ' — 2x your money!' : ''}</p>
+          <p className="text-sm text-white/90 mt-1">We match your first approved deposit with a {bonusPct}% bonus, credited the moment it is approved{bonusPct === 100 ? ' — deposit 50, receive 100 total' : ''}. It also counts toward Level 2 — 82.64 USDT in total deposits unlocks Cash Out &amp; Payment.</p>
+        </div>
+      )}
       <Card className="p-5">
         <StepBar steps={['Method & amount', 'Payment details', 'Review', 'Submit']} current={dstep} />
         {dstep === 0 && (
@@ -212,7 +218,7 @@ export function CashOut() {
   const submit = async () => {
     if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum cash out is ' + fmtMoney(50) })
     if (!dest.trim()) return toast({ kind: 'error', title: 'Enter the destination account' })
-    if (user && user.level < 2) return toast({ kind: 'error', title: 'Level 2 required', body: 'Cash out unlocks at Level 2 — make a deposit or refer 50 friends.' })
+    if (user && user.level < 2) return toast({ kind: 'error', title: 'Level 2 required', body: 'Cash out unlocks at Level 2 — reach 82.64 USDT in deposits or refer 50 friends.' })
     const suThC = db.settings.stepUpThresholdBdt ?? 0
     if (suThC && amtBDT > suThC) {
       if (!stepPw) return setErrMsg('This cash out is above ৳' + suThC.toLocaleString() + ' — enter your account password for the extra verification.')
@@ -235,7 +241,7 @@ export function CashOut() {
       {user && user.level < 2 && (
         <div className="rounded-2xl border border-amber-300/70 bg-amber-50 dark:bg-amber-500/10 p-4 mb-4 flex items-center gap-3">
           <Award size={20} className="text-amber-500 shrink-0" />
-          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Cash out needs Level 2. It unlocks automatically with your first deposit or 50 referrals.</p>
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Cash out needs Level 2. It unlocks automatically at 82.64 USDT in total deposits or 50 referrals.</p>
           <Btn variant="outline" onClick={() => navigate('/level')}>Unlock</Btn>
         </div>
       )}

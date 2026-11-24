@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { Btn, Card, Modal } from '../components/ui'
 import { PageHead } from './Services'
@@ -274,7 +274,8 @@ export function SpinPage() {
 
 /* ---------------- Complete Tasks ---------------- */
 export function TasksPage() {
-  const { earnInfo, completeEarnTask, toast, db } = useApp()
+  const { earnInfo, completeEarnTask, toast, db, user } = useApp()
+  const navigate = useNavigate()
   const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const info = earnInfo()
   const [phase, setPhase] = useState<Record<string, number>>({})
@@ -306,6 +307,8 @@ export function TasksPage() {
       </Card>
       <div className="space-y-2.5">
         {EARN_TASKS.map(task => {
+          const gateReady = task.id === 'first_deposit' ? !!user?.hasDeposited : task.id === 'install_app' ? !!user?.appBonusAt : null
+          const goLink = task.id === 'first_deposit' ? '/add' : task.id === 'install_app' ? '/install' : null
           const done = info.tasksDone.includes(task.id)
           const counting = phase[task.id] !== undefined && phase[task.id] > 0
           const ready = phase[task.id] === 0
@@ -319,7 +322,8 @@ export function TasksPage() {
               </div>
               {done ? <span className="font-extrabold text-emerald-600 text-sm shrink-0">✓ Done</span>
                 : counting ? <Btn className="!py-2 !text-xs shrink-0" disabled>Verifying… {phase[task.id]}s</Btn>
-                : ready ? <Btn className="!py-2 !text-xs shrink-0" onClick={() => claim(task.id)}>Claim {usd(task.reward)}</Btn>
+                : gateReady === false && goLink ? <Btn className="!py-2 !text-xs shrink-0" onClick={() => navigate(goLink)}>Start</Btn>
+                : gateReady === true || ready ? <Btn className="!py-2 !text-xs shrink-0" onClick={() => claim(task.id)}>Claim {usd(task.reward)}</Btn>
                 : <Btn className="!py-2 !text-xs shrink-0" onClick={() => start(task.id)}>Start</Btn>}
             </Card>
           )

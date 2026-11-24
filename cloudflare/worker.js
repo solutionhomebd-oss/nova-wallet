@@ -289,7 +289,7 @@ async function getSettings(db) {
   const rows = await db.prepare("SELECT key, value FROM platform_settings").all();
   const m = {};
   for (const r of rows.results) { try { m[r.key] = JSON.parse(r.value); } catch { m[r.key] = {}; } }
-  return {
+  const out = {
     sendPct: m.fees?.send_pct ?? 0.5,
     cashoutPct: m.fees?.cashout_pct ?? 1.5,
     referralPct: m.referral?.commission_pct ?? 5,
@@ -299,6 +299,8 @@ async function getSettings(db) {
     loanLimit: m.loan?.limit ?? 100000,
     bdtPerUsd: m.rates?.bdt_per_usd ?? 121,
   };
+  emailRateBdtPerUsd = out.bdtPerUsd;
+  return out;
 }
 
 async function feeDiscount(db, level) {
@@ -2945,7 +2947,11 @@ function brandedEmail(heading, paras, highlight) {
   const hl = highlight ? "<div style=\"background-color:#f5f3ff;border:1px solid #ddd6fe;border-radius:12px;padding:16px;text-align:center;font-size:20px;font-weight:bold;color:#4c1d95;margin-top:20px;\">" + highlight + "</div>" : "";
   return { text, html: emailShell(heading, paras.map(para).join("") + hl) };
 }
-const fmtTk = (n) => "\u09F3" + Math.round(Number(n)).toLocaleString("en-US");
+// Emails always show amounts in USD (owner rule, 2026-11-25): amounts are
+// stored in BDT, so convert at the platform rate. The rate is cached
+// here and refreshed by every getSettings() call (seed = platform default).
+let emailRateBdtPerUsd = 121;
+const fmtTk = (n) => "$" + (Number(n) / (emailRateBdtPerUsd || 121)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 async function logEmail(db, e) {
   try { await db.prepare("INSERT INTO email_log (user_id, to_email, kind, subject, status, error, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(e.userId || null, e.to || "", e.kind || "", e.subject || "", e.status || "", e.error ? String(e.error).slice(0, 300) : null, e.ip || null, Date.now()).run(); } catch { /* ignore */ }
 }

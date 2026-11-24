@@ -36,9 +36,9 @@ const SupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'Support
 const AdminSupportChatPage = lazyNamed(() => import('./pages/SupportPages'), 'AdminSupportChatPage')
 const AdminUserPage = lazyNamed(() => import('./pages/Admin'), 'AdminUserPage')
 const EarnPage = lazyNamed(() => import('./pages/Extras'), 'EarnPage')
+const StakingPage = lazyNamed(() => import('./pages/Extras'), 'StakingPage')
 const InstallPage = lazyNamed(() => import('./pages/Extras'), 'InstallPage')
 const SwapPage = lazyNamed(() => import('./pages/Extras'), 'SwapPage')
-const TradePage = lazyNamed(() => import('./pages/Extras'), 'TradePage')
 const AdsPage = lazyNamed(() => import('./pages/EarnPages'), 'AdsPage')
 const CheckinPage = lazyNamed(() => import('./pages/EarnPages'), 'CheckinPage')
 const QuizPage = lazyNamed(() => import('./pages/EarnPages'), 'QuizPage')
@@ -194,6 +194,7 @@ export default function App() {
             <Route path="/payment" element={<DirectWithdraw />} />
             <Route path="/withdraw" element={<Navigate to="/payment" replace />} />
             <Route path="/earn" element={<EarnPage />} />
+            <Route path="/staking" element={<StakingPage />} />
             <Route path="/install" element={<InstallPage />} />
             <Route path="/earn/checkin" element={<CheckinPage />} />
             <Route path="/earn/ads" element={<AdsPage />} />
@@ -202,8 +203,7 @@ export default function App() {
             <Route path="/earn/tasks" element={<TasksPage />} />
             <Route path="/earn/quiz" element={<QuizPage />} />
             <Route path="/swap" element={<SwapPage />} />
-            <Route path="/trade" element={<TradePage />} />
-            <Route path="/referral" element={<Referral />} />
+                        <Route path="/referral" element={<Referral />} />
             <Route path="/loan" element={<LoanPage view="hub" />} />
             <Route path="/loan/apply" element={<LoanPage view="apply" />} />
             <Route path="/loan/active" element={<LoanPage view="active" />} />

@@ -16,9 +16,8 @@ const ACTIONS_RAW: { to: string; labelKey: string; icon: any; g: string; soon?: 
   { to: '/earn', labelKey: 'act_earn', icon: PiggyBank, g: 'from-lime-500 to-green-600' },
   { to: '/loan', labelKey: 'act_loan', icon: HandCoins, g: 'from-indigo-500 to-blue-700' },
   { to: '/crypto', labelKey: 'act_crypto', icon: Bitcoin, g: 'from-orange-500 to-amber-600' },
-  { to: '/earn#staking', labelKey: 'act_staking', icon: Coins, g: 'from-fuchsia-500 to-purple-700' },
+  { to: '/staking', labelKey: 'act_staking', icon: Coins, g: 'from-fuchsia-500 to-purple-700' },
   { to: '/swap', labelKey: 'act_swap', icon: ArrowLeftRight, g: 'from-purple-500 to-violet-700' },
-  { to: '/trade', labelKey: 'act_trade', icon: TrendingUp, g: 'from-slate-600 to-slate-800' },
   { to: '/install', labelKey: 'act_install', icon: Download, g: 'from-teal-500 to-emerald-600' },
 ]
 export default function Home() {

@@ -1,14 +1,13 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeftRight, Award, BadgePercent, Coins, Globe, Nfc, Snowflake, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowLeftRight, Award, BadgePercent, Coins, Globe, Nfc, Snowflake, Sparkles } from 'lucide-react'
 import LogoMark from '../components/LogoMark'
-import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { useApp } from '../lib/store'
 import { withdrawMethods, CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
 import { ADS_PER_DAY, EARN_TASKS, SCRATCH_PER_DAY, SPINS_PER_DAY } from '../lib/earn'
 import { COIN_META, useMarket } from '../lib/market'
 import { Badge, Btn, Card, Empty, FeatureOff, Input, MaxBtn, Modal, Select, TxDirIcon , StepBar, StepUpField, WizardNav } from '../components/ui'
-import { fmtBDT, fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
+import { fmtDateTime, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { PageHead, ResultModal, SuccessModal } from './Services'
 import { promptInstall } from '../lib/install'
 
@@ -136,15 +135,7 @@ const PLANS = [
   { days: 180, apy: 16, label: '180 days', note: 'Max return' },
 ]
 export function EarnPage() {
-  const { user, db, walletOf, stake, unstake, toast, earnInfo, addTicket, replyTicket, t } = useApp()
-  const location = useLocation()
-  useEffect(() => {
-    if (location.hash !== '#staking') return
-    const id = setTimeout(() => document.getElementById('staking')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
-    return () => clearTimeout(id)
-  }, [location.hash])
-  const [amount, setAmount] = useState(''); const [plan, setPlan] = useState(1)
-  const [relReq, setRelReq] = useState<any>(null); const [relMsg, setRelMsg] = useState(''); const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null); const [errMsg, setErrMsg] = useState('')
+  const { user, db, earnInfo, t } = useApp()
   if (!user) return null
   const einfo = earnInfo()
   const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
@@ -157,38 +148,9 @@ export function EarnPage() {
     { to: '/earn/tasks', icon: '✅', title: 'Complete Tasks', sub: 'Simple tasks, real rewards', badge: (EARN_TASKS.length - einfo.tasksDone.length) + ' open' },
     { to: '/earn/quiz', icon: '🧠', title: 'Daily Quiz', sub: usd(4) + ' per correct answer', badge: einfo.quizDay === todayL ? 'Played today' : 'Play now' },
   ]
-  const w = walletOf(user.id)
-  const availUsd = w.available / db.settings.bdtPerUsd + (w.holdings.USDT ?? 0)
-  const amt = Number(amount) || 0
-  const amtBDT = Math.round(amt * db.settings.bdtPerUsd)
-  const myStakes = db.stakes.filter(s => s.userId === user.id)
-  const accrued = (s: typeof myStakes[number]) => Math.round(s.amount * s.apy / 100 * Math.max(0, (Date.now() - new Date(s.startAt).getTime()) / 86_400_000) / 365)
-  const unlockAt = (s: typeof myStakes[number]) => new Date(s.startAt).getTime() + s.termDays * 86_400_000
-  const isLocked = (s: typeof myStakes[number]) => s.termDays > 0 && Date.now() < unlockAt(s)
-  const fmtDay = (ts: number) => new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  const openRelease = (s: typeof myStakes[number]) => {
-    setRelReq(s)
-    setRelMsg('Hello, please release my stake early.\n\nStake: ' + usd(s.amount) + ' · ' + s.apy + '% APY · ' + s.termDays + '-day plan\nStarted: ' + fmtDay(new Date(s.startAt).getTime()) + ' · Unlocks: ' + fmtDay(unlockAt(s)) + '\n\nReason: ')
-  }
-  const sendRelease = () => {
-    if (!relReq || !relMsg.trim()) return
-    const open = db.tickets.find(t => t.userId === user.id && t.status !== 'resolved')
-    if (open) replyTicket(open.id, relMsg.trim(), 'user')
-    else addTicket('Early stake release request', relMsg.trim())
-    setRelReq(null); setRelMsg('')
-    toast({ kind: 'success', title: 'Request sent to Support', body: 'Support can release this stake early from your account. You will be notified when they reply.' })
-  }
-  const totalStaked = myStakes.filter(s => s.status === 'active').reduce((a, s) => a + s.amount, 0)
-  const totalEarned = myStakes.filter(s => s.status === 'active').reduce((a, s) => a + accrued(s), 0)
-  const submit = async () => {
-    if (!amt || amt < 1) return toast({ kind: 'error', title: 'Minimum stake is $1.00' })
-    const err = await stake(amtBDT, PLANS[plan].apy, PLANS[plan].days)
-    if (err) return setErrMsg(err)
-    setAmount(''); setOkModal({ title: 'Staked successfully ✓', rows: [['Amount', fmtUSDT(amt)], ['Plan', PLANS[plan].label + ' · ' + PLANS[plan].apy + '% APY'], ['Status', 'Active — earning daily']] })
-  }
   return (
     <div>
-      <PageHead title="Earn" sub="Rewards, staking and more ways to grow your balance." />
+      <PageHead title="Earn" sub="Rewards and fun ways to earn free USDT every day." />
       <h3 className="font-extrabold mb-3">{t('earn_grow')}</h3>
       <div className="grid grid-cols-3 gap-2.5 mb-6">
         <Link to="/crypto" className="block">
@@ -198,13 +160,13 @@ export function EarnPage() {
             <p className="text-[11px] text-slate-400">{t('earn_crypto_sub')}</p>
           </Card>
         </Link>
-        <button onClick={() => document.getElementById('staking')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="block w-full">
+        <Link to="/staking" className="block">
           <Card className="p-4 h-full hover:border-violet-400 transition text-center">
             <span className="text-2xl">🌱</span>
             <p className="font-extrabold text-sm mt-1.5">{t('act_staking')}</p>
             <p className="text-[11px] text-slate-400">{t('earn_staking_sub')}</p>
           </Card>
-        </button>
+        </Link>
         <Link to="/install" className="block">
           <Card className="p-4 h-full hover:border-violet-400 transition text-center">
             <span className="text-2xl">📲</span>
@@ -227,7 +189,48 @@ export function EarnPage() {
           </Link>
         ))}
       </div>
-      <h3 id="staking" className="font-extrabold mb-3 scroll-mt-24">Staking</h3>
+    </div>
+  )
+}
+
+export function StakingPage() {
+  const { user, db, walletOf, stake, unstake, toast, addTicket, replyTicket } = useApp()
+  const [amount, setAmount] = useState(''); const [plan, setPlan] = useState(1)
+  const [relReq, setRelReq] = useState<any>(null); const [relMsg, setRelMsg] = useState(''); const [okModal, setOkModal] = useState<{ title: string; rows: [string, string][] } | null>(null); const [errMsg, setErrMsg] = useState('')
+  if (!user) return null
+  const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
+  const w = walletOf(user.id)
+  const availUsd = w.available / db.settings.bdtPerUsd + (w.holdings.USDT ?? 0)
+  const amt = Number(amount) || 0
+  const amtBDT = Math.round(amt * db.settings.bdtPerUsd)
+  const myStakes = db.stakes.filter(s => s.userId === user.id)
+  const accrued = (s: typeof myStakes[number]) => Math.round(s.amount * s.apy / 100 * Math.max(0, (Date.now() - new Date(s.startAt).getTime()) / 86_400_000) / 365)
+  const unlockAt = (s: typeof myStakes[number]) => new Date(s.startAt).getTime() + s.termDays * 86_400_000
+  const isLocked = (s: typeof myStakes[number]) => s.termDays > 0 && Date.now() < unlockAt(s)
+  const fmtDay = (ts: number) => new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const openRelease = (s: typeof myStakes[number]) => {
+    setRelReq(s)
+    setRelMsg('Hello, please release my stake early.\\n\\nStake: ' + usd(s.amount) + ' · ' + s.apy + '% APY · ' + s.termDays + '-day plan\\nStarted: ' + fmtDay(new Date(s.startAt).getTime()) + ' · Unlocks: ' + fmtDay(unlockAt(s)) + '\\n\\nReason: ')
+  }
+  const sendRelease = () => {
+    if (!relReq || !relMsg.trim()) return
+    const open = db.tickets.find(t => t.userId === user.id && t.status !== 'resolved')
+    if (open) replyTicket(open.id, relMsg.trim(), 'user')
+    else addTicket('Early stake release request', relMsg.trim())
+    setRelReq(null); setRelMsg('')
+    toast({ kind: 'success', title: 'Request sent to Support', body: 'Support can release this stake early from your account. You will be notified when they reply.' })
+  }
+  const totalStaked = myStakes.filter(s => s.status === 'active').reduce((a, s) => a + s.amount, 0)
+  const totalEarned = myStakes.filter(s => s.status === 'active').reduce((a, s) => a + accrued(s), 0)
+  const submit = async () => {
+    if (!amt || amt < 1) return toast({ kind: 'error', title: 'Minimum stake is $1.00' })
+    const err = await stake(amtBDT, PLANS[plan].apy, PLANS[plan].days)
+    if (err) return setErrMsg(err)
+    setAmount(''); setOkModal({ title: 'Staked successfully ✓', rows: [['Amount', fmtUSDT(amt)], ['Plan', PLANS[plan].label + ' · ' + PLANS[plan].apy + '% APY'], ['Status', 'Active — earning daily']] })
+  }
+  return (
+    <div>
+      <PageHead title="Staking" sub="Stake USDT and earn daily interest. Unstake anytime (flexible) or at term." />
       <div className="grid grid-cols-3 gap-3 mb-4">
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Available</p><p className="font-extrabold mt-1">{fmtUSDT(availUsd)}</p></Card>
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Staked</p><p className="font-extrabold mt-1 text-violet-600">{usd(totalStaked)}</p></Card>
@@ -345,102 +348,6 @@ export function SwapPage() {
       </Card>
       <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <ResultModal open={!!errMsg} onClose={() => setErrMsg('')} kind="error" title="Swap failed" body={errMsg} />
-    </div>
-  )
-}
-
-export function TradePage() {
-  const { user, db, walletOf, buyCrypto, sellCrypto, toast, t } = useApp()
-  const { coins, loading, isLive } = useMarket()
-  const [sel, setSel] = useState('BTC')
-  const [side, setSide] = useState<'buy' | 'sell'>('buy')
-  const [amount, setAmount] = useState(''); const [coinAmt, setCoinAmt] = useState(''); const [usdtVal, setUsdtVal] = useState('')
-  if (!user) return null
-  if (db.settings.features?.trading === false) return <FeatureOff label="Trading" />
-  const w = walletOf(user.id)
-  const coin = coins.find(c => c.symbol === sel) ?? coins[0]
-  const amt = Number(amount) || 0
-  const px = coin?.priceUsd ?? 0
-  const spendableT = (w.holdings.USDT ?? 0) + w.available / db.settings.bdtPerUsd
-  const setUsdtT = (v: string) => { setAmount(v); setCoinAmt(v && px ? String(Math.round(Number(v) / px * 1e6) / 1e6) : '') }
-  const setCoinT = (v: string) => { setCoinAmt(v); setAmount(v ? String(Math.round(Number(v) * px * 100) / 100) : '') }
-  const setCoinSellT = (v: string) => { setAmount(v); setUsdtVal(v ? String(Math.round(Number(v) * px * 100) / 100) : '') }
-  const setUsdtSellT = (v: string) => { setUsdtVal(v); setAmount(v && px ? String(Math.round(Number(v) / px * 1e6) / 1e6) : '') }
-  const data = coin ? coin.spark.filter((_, i) => i % Math.max(1, Math.floor(coin.spark.length / 40)) === 0).map((v, i) => ({ i, v })) : []
-  const up = (coin?.change24h ?? 0) >= 0
-  const submit = async () => {
-    if (!coin || !amt) return toast({ kind: 'error', title: 'Enter an amount' })
-    const err = side === 'buy' ? await buyCrypto(coin.symbol, amt, coin.priceUsd) : await sellCrypto(coin.symbol, amt, coin.priceUsd)
-    if (err) return toast({ kind: 'error', title: err })
-    setAmount(''); setCoinAmt(''); setUsdtVal(''); toast({ kind: 'success', title: (side === 'buy' ? 'Bought ' : 'Sold ') + coin.symbol, body: 'Executed at the confirmed market price.' })
-  }
-  return (
-    <div>
-      <PageHead title="Trade" sub={isLive ? 'Live spot trading · CoinGecko prices' : 'Cached prices — live feed unreachable'} />
-      <div className="flex gap-2 overflow-x-auto no-scrollbar mb-4 -mx-4 px-4">
-        {coins.map(c => (
-          <button key={c.symbol} onClick={() => { setSel(c.symbol); setAmount(''); setCoinAmt(''); setUsdtVal('') }} className={`shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border-2 font-bold text-sm ${sel === c.symbol ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/10' : 'border-slate-200/80 dark:border-slate-700/70 bg-white dark:bg-slate-900'}`}>
-            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-extrabold" style={{ background: COIN_META[c.symbol].color }}>{c.symbol[0]}</span>{c.symbol}
-            <span className={c.change24h >= 0 ? 'text-emerald-500' : 'text-rose-500'}>{c.change24h >= 0 ? '+' : ''}{c.change24h.toFixed(1)}%</span>
-          </button>
-        ))}
-      </div>
-      {loading || !coin ? <Card className="p-8 text-center text-slate-400">Loading market…</Card> : (
-        <>
-          <Card className="p-5 mb-4">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div><p className="font-extrabold text-lg">{coin.name} <span className="text-slate-400 text-sm">{coin.symbol}/USDT</span></p>
-                <p className="text-3xl font-extrabold mt-1">{fmtPrice(coin.priceUsd)}</p>
-                <p className="text-sm text-slate-400">{fmtPrice(coin.priceUsd)} · You hold <b className="text-slate-600 dark:text-slate-200">{(w.holdings[coin.symbol] ?? 0).toFixed(6)} {coin.symbol}</b></p></div>
-              <span className={`flex items-center gap-1 font-extrabold ${up ? 'text-emerald-500' : 'text-rose-500'}`}>{up ? <TrendingUp size={17} /> : <TrendingDown size={17} />}{up ? '+' : ''}{coin.change24h.toFixed(2)}%</span>
-            </div>
-            <div className="h-36 mt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data}>
-                  <YAxis hide domain={['dataMin', 'dataMax']} />
-                  <Tooltip formatter={(v: any) => [fmtPrice(Number(v)), 'Price']} labelFormatter={() => ''} />
-                  <Area isAnimationActive={false} type="monotone" dataKey="v" stroke={up ? '#10b981' : '#f43f5e'} fill={up ? '#10b98133' : '#f43f5e33'} strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-          <Card className="p-5 space-y-4">
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800">
-              {(['buy', 'sell'] as const).map(x => (
-                <button key={x} onClick={() => { setSide(x); setAmount(''); setCoinAmt(''); setUsdtVal('') }} className={`py-2.5 rounded-xl text-sm font-extrabold capitalize ${side === x ? (x === 'buy' ? 'bg-emerald-500 text-white shadow' : 'bg-rose-500 text-white shadow') : 'text-slate-500'}`}>{x === 'buy' ? t('buy') : t('sell')} {coin.symbol}</button>
-              ))}
-            </div>
-            {side === 'buy' && coin.symbol !== 'USDT' ? (
-              <>
-                <div className="relative">
-                  <Input label="Amount (USDT)" type="number" placeholder="0.00" value={amount} onChange={e => setUsdtT(e.target.value)} />
-                  <MaxBtn onClick={() => setUsdtT(String(Math.round(spendableT * 100) / 100))} />
-                </div>
-                <Input label={`Amount (${coin.symbol})`} type="number" placeholder="0.00" value={coinAmt} onChange={e => setCoinT(e.target.value)} />
-              </>
-            ) : side === 'sell' && coin.symbol !== 'USDT' ? (
-              <>
-                <div className="relative">
-                  <Input label={`Amount (${coin.symbol})`} type="number" placeholder="0.00" value={amount} onChange={e => setCoinSellT(e.target.value)} />
-                  <MaxBtn onClick={() => setCoinSellT(String(w.holdings[coin.symbol] ?? 0))} />
-                </div>
-                <Input label="Value in USDT" type="number" placeholder="0.00" value={usdtVal} onChange={e => setUsdtSellT(e.target.value)} />
-              </>
-            ) : (
-              <div className="relative">
-                <Input label={side === 'buy' ? t('amount_bdt') : `Amount (${coin.symbol})`} type="number" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} />
-                <MaxBtn onClick={() => setAmount(String(side === 'buy' ? w.available : (w.holdings[coin.symbol] ?? 0)))} />
-              </div>
-            )}
-            {amt > 0 && <p className="text-xs text-slate-500">{side === 'buy'
-              ? <>You receive ≈ <b>{(coin.symbol === 'USDT' ? amt / db.settings.bdtPerUsd : amt / coin.priceUsd).toFixed(coin.symbol === 'USDT' ? 2 : 6)} {coin.symbol}</b></>
-              : coin.symbol === 'USDT'
-                ? <>You receive ≈ <b>{fmtBDT(Math.round(amt * db.settings.bdtPerUsd))}</b></>
-                : <>You receive ≈ <b>{fmtUSDT(amt * coin.priceUsd)}</b></>}</p>}
-            <Btn className={`w-full py-3.5 ${side === 'sell' ? '!bg-rose-500' : '!bg-emerald-500'}`} onClick={submit}>{side === 'buy' ? t('buy') : t('sell')} {coin.symbol}</Btn>
-          </Card>
-        </>
-      )}
     </div>
   )
 }

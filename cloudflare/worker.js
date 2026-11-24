@@ -654,18 +654,21 @@ async function handleBootstrap(request, env, auth) {
     const ref = await db.prepare("SELECT id FROM users WHERE referral_code = ?").bind(String(body.referralCode).trim()).first();
     if (ref && ref.id !== auth.uid) referrerId = ref.id;
   }
-  // Registration email verification: a valid grant (from /v1/verify-email)
-  // marks the new account's email as verified and is consumed here.
-  let emailVerified = 0;
+  // RULE (2026-11-24, owner's order): account creation REQUIRES a valid
+  // email-verification grant from the /v1/verify-email OTP flow. A bare
+  // Firebase sign-up can never mint a NovaWallet account. Roles are never
+  // set here either — role lives only in D1 (default 'user') and changes
+  // only through a full-scope admin (handleAdminSetRole).
+  let grantOk = false;
   if (body.verifyGrant) {
     try {
       const vr = await db.prepare("SELECT grant_hash, grant_expires FROM email_verifications WHERE email = ?").bind(email).first();
-      if (vr?.grant_hash && Number(vr.grant_expires) > Date.now() && (await sha256Hex(String(body.verifyGrant))) === vr.grant_hash) {
-        emailVerified = 1;
-        await db.prepare("DELETE FROM email_verifications WHERE email = ?").bind(email).run();
-      }
-    } catch { /* verification is best effort at bootstrap */ }
+      if (vr?.grant_hash && Number(vr.grant_expires) > Date.now() && (await sha256Hex(String(body.verifyGrant))) === vr.grant_hash) grantOk = true;
+    } catch { grantOk = false; }
   }
+  if (!grantOk) return json(request, { error: "email_verification_required", detail: "Verify your email with the code we sent before creating your account." }, 403);
+  const emailVerified = 1;
+  try { await db.prepare("DELETE FROM email_verifications WHERE email = ?").bind(email).run(); } catch { /* grant consumed */ }
   const registrationCountry = requestCountry(request);
   const walletId = crypto.randomUUID();
   const stmts = [

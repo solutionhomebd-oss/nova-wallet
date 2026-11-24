@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApp } from '../lib/store'
-import { Btn, Card } from '../components/ui'
+import { Btn, Card, Modal } from '../components/ui'
 import { PageHead } from './Services'
 import { fmtUSDT, fmtDateTime } from '../lib/utils'
-import { ADS_PER_DAY, CHECKIN_REWARDS, EARN_TASKS, QUIZ, SCRATCH_PER_DAY, SPINS_PER_DAY, WHEEL_PRIZES } from '../lib/earn'
+import { ADS_PER_DAY, CHECKIN_REWARDS, EARN_TASKS, SPINS_PER_DAY, WHEEL_PRIZES } from '../lib/earn'
 
 const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' })
 const yesterdayStr = () => { const t = new Date(todayStr() + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10) }
@@ -124,27 +124,68 @@ function AdsterraBanner() {
   }, [])
   return <div ref={ref} className="w-[300px] max-w-full min-h-[250px]" />
 }
+const AD_INVOKE_URL = 'https://bauval.org/22/dfa6ed35125429e4aa96f8b0a2ae7b6b'
+async function adBlockerActive(): Promise<boolean> {
+  // 1) Cosmetic-filter bait — AdGuard / uBlock element hiding kills the bait box
+  try {
+    const bait = document.createElement('div')
+    bait.className = 'adsbygoogle ad-banner ad-slot textads banner_ad pub_300x250'
+    bait.style.cssText = 'position:absolute;top:-20px;left:-20px;width:12px;height:12px;pointer-events:none;'
+    document.body.appendChild(bait)
+    await new Promise(r => setTimeout(r, 150))
+    const cs = getComputedStyle(bait)
+    const hidden = bait.offsetHeight === 0 || cs.display === 'none' || cs.visibility === 'hidden'
+    bait.remove()
+    if (hidden) return true
+  } catch { /* ignore */ }
+  // 2) Network test — DNS-level blockers (e.g. AdGuard Private DNS) kill the ad domain itself
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 4000)
+    await fetch(AD_INVOKE_URL + '?nwprobe=' + Date.now(), { mode: 'no-cors', signal: ctrl.signal, cache: 'no-store' })
+    clearTimeout(t)
+    return false
+  } catch { return true }
+}
 export function AdsPage() {
-  const { earnInfo, watchAdReward, toast, db } = useApp()
+  const { earnInfo, watchAdReward, toast, db, user } = useApp()
   const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
   const info = earnInfo()
   const left = ADS_PER_DAY - info.ads
-  const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>('idle')
+  // A watched-but-unclaimed ad locks the next watch until it is claimed —
+  // the lock survives leaving and re-entering the page.
+  const pendingKey = 'nw.adPending.' + (user?.id ?? '')
+  const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>(() => { try { return localStorage.getItem(pendingKey) ? 'done' : 'idle' } catch { return 'idle' } })
   const [progress, setProgress] = useState(0)
+  const [checking, setChecking] = useState(false)
+  const [blockWarn, setBlockWarn] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => () => { if (timer.current) clearInterval(timer.current) }, [])
-  const watch = () => {
+  const startWatch = () => {
     setPhase('watching'); setProgress(0)
     timer.current = setInterval(() => {
       setProgress(p => {
-        if (p >= 100) { if (timer.current) clearInterval(timer.current); setPhase('done'); return 100 }
+        if (p >= 100) {
+          if (timer.current) clearInterval(timer.current)
+          try { localStorage.setItem(pendingKey, '1') } catch { /* ignore */ }
+          setPhase('done'); return 100
+        }
         return p + 1
       })
     }, 100)
   }
+  const watch = async () => {
+    if (checking || phase !== 'idle') return
+    setChecking(true)
+    const blocked = await adBlockerActive()
+    setChecking(false)
+    if (blocked) { setBlockWarn(true); return }
+    startWatch()
+  }
   const claim = async () => {
     const r = await watchAdReward()
     if (r.err) return toast({ kind: 'error', title: r.err })
+    try { localStorage.removeItem(pendingKey) } catch { /* ignore */ }
     toast({ kind: 'success', title: 'Ad reward ✓', body: '+' + usd(r.amount ?? 0) + ' · ' + (r.left ?? 0) + ' ads left today · Added to your balance' })
     setPhase('idle'); setProgress(0)
   }
@@ -162,11 +203,20 @@ export function AdsPage() {
         {phase === 'watching' && <p className="text-center text-xs font-bold text-slate-400 mt-2">Your ad is playing — keep this page open…</p>}
         <div className="mt-4"><Pips total={ADS_PER_DAY} used={info.ads} /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.ads} of {ADS_PER_DAY} ads watched today</p></div>
         {phase === 'watching' && <p className="text-center text-sm font-bold text-slate-500 mt-4">Watching ad… {Math.ceil((100 - progress) / 10)}s</p>}
-        {phase === 'idle' && <Btn className="w-full py-3.5 mt-4" disabled={left <= 0} onClick={watch}>{left <= 0 ? 'No ads left today' : '▶ Watch ad (10s)'}</Btn>}
+        {phase === 'idle' && <Btn className="w-full py-3.5 mt-4" disabled={left <= 0 || checking} onClick={watch}>{left <= 0 ? 'No ads left today' : checking ? 'Checking…' : '▶ Watch ad (10s)'}</Btn>}
         {phase === 'done' && <Btn className="w-full py-3.5 mt-4" onClick={claim}>Claim reward</Btn>}
+        {phase === 'done' && <p className="text-xs font-bold text-amber-500 text-center mt-2">Claim this reward to unlock the next ad.</p>}
         <p className="text-xs text-slate-400 text-center mt-3">The reward is credited to your available balance as soon as you claim it.</p>
       </Card>
       <EarnHistory />
+      <Modal open={blockWarn} onClose={() => setBlockWarn(false)} title="⚠ Ad Blocker Detected">
+        <p className="text-sm text-slate-500 dark:text-slate-400">It looks like <b>AdGuard</b> or another ad blocker is turned on. While it is active, ads can't load — so ad rewards can't be earned here.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Please turn off your ad blocker for <b>novawallet.pp.ua</b>. If you use AdGuard Private DNS, set your phone's Private DNS to <b>Automatic</b>. Then tap Try Again.</p>
+        <div className="flex gap-2 mt-5">
+          <Btn className="flex-1 py-3" onClick={() => { setBlockWarn(false); void watch() }}>Try Again</Btn>
+          <Btn variant="ghost" className="flex-1 py-3" onClick={() => setBlockWarn(false)}>Cancel</Btn>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -216,89 +266,6 @@ export function SpinPage() {
         {lastPrize !== null && <p className="font-extrabold mt-4">{lastPrize > 0 ? '🎉 You won ' + usd(lastPrize) : 'No prize — better luck next spin!'}</p>}
         <div className="w-full mt-4"><Pips total={SPINS_PER_DAY} used={info.spins} /><p className="text-[11px] font-bold text-slate-400 mt-1.5 text-center">Wheel prizes: {[...new Set(WHEEL_PRIZES)].sort((a, b) => a - b).map(x => (x / db.settings.bdtPerUsd).toFixed(2)).join(' · ')} USDT</p></div>
         <Btn className="w-full py-3.5 mt-4" disabled={spinning || left <= 0} onClick={spin}>{spinning ? 'Spinning…' : left <= 0 ? 'No spins left today' : 'Spin now (free)'}</Btn>
-      </Card>
-      <EarnHistory />
-    </div>
-  )
-}
-
-/* ---------------- Scratch Card ---------------- */
-export function ScratchPage() {
-  const { earnInfo, scratchDraw, toast, db } = useApp()
-  const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
-  const info = earnInfo()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [prize, setPrize] = useState<number | null>(null)
-  const left = SCRATCH_PER_DAY - info.scratches
-  const [revealed, setRevealed] = useState(false)
-  const drawing = useRef(false)
-  const drawnOnce = useRef(false)
-
-  const paintCover = () => {
-    const c = canvasRef.current; if (!c) return
-    const ctx = c.getContext('2d'); if (!ctx) return
-    const g = ctx.createLinearGradient(0, 0, c.width, c.height)
-    g.addColorStop(0, '#8b5cf6'); g.addColorStop(1, '#06b6d4')
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.fillStyle = g; ctx.fillRect(0, 0, c.width, c.height)
-    ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = 'bold 34px system-ui'; ctx.textAlign = 'center'
-    ctx.fillText('SCRATCH HERE', c.width / 2, c.height / 2 - 6)
-    ctx.font = 'bold 20px system-ui'; ctx.fillText('🎫 Good luck!', c.width / 2, c.height / 2 + 30)
-  }
-  const draw = async () => {
-    const r = await scratchDraw()
-    if (r.err) { toast({ kind: 'error', title: r.err }); return }
-    setPrize(r.prize ?? 0); setRevealed(false)
-    requestAnimationFrame(paintCover)
-  }
-  useEffect(() => { if (!drawnOnce.current) { drawnOnce.current = true; if (left > 0) draw() } }, [])
-  const scratchAt = (e: React.PointerEvent) => {
-    if (revealed || prize === null) return
-    const c = canvasRef.current; if (!c) return
-    const rect = c.getBoundingClientRect()
-    const x = (e.clientX - rect.left) * (c.width / rect.width)
-    const y = (e.clientY - rect.top) * (c.height / rect.height)
-    const ctx = c.getContext('2d'); if (!ctx) return
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill()
-    drawing.current = true
-  }
-  const checkReveal = () => {
-    if (!drawing.current || revealed) return
-    drawing.current = false
-    const c = canvasRef.current; if (!c) return
-    const ctx = c.getContext('2d'); if (!ctx) return
-    const data = ctx.getImageData(0, 0, c.width, c.height).data
-    let clear = 0, total = 0
-    for (let i = 3; i < data.length; i += 64) { total++; if (data[i] === 0) clear++ }
-    if (total && clear / total > 0.35) {
-      setRevealed(true)
-      ctx.clearRect(0, 0, c.width, c.height)
-      if (prize !== null && prize > 0) toast({ kind: 'success', title: '🎉 You won ' + usd(prize), body: 'The reward was added to your balance when the card was drawn.' })
-    }
-  }
-  return (
-    <div>
-      <BackLink />
-      <PageHead title="Scratch Card" sub={`Scratch to reveal a prize up to ${usd(50)}. ${left} card${left === 1 ? '' : 's'} left today.`} />
-      <EarnSummary />
-      <Card className="p-5">
-        <div className="mb-4"><Pips total={SCRATCH_PER_DAY} used={info.scratches} color="bg-amber-500" /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.scratches} of {SCRATCH_PER_DAY} cards used today</p></div>
-        {(prize === null && left <= 0) ? (
-          <p className="text-center font-bold text-slate-500 py-10">No scratch cards left today — come back tomorrow. 🎫</p>
-        ) : (
-          <>
-            <div className="relative rounded-3xl overflow-hidden select-none touch-none" style={{ height: 200 }}>
-              <div className="absolute inset-0 bg-gradient-to-br from-amber-100 to-rose-100 dark:from-slate-800 dark:to-slate-700 flex flex-col items-center justify-center">
-                {prize !== null && prize > 0 ? (<><p className="text-5xl">🎉</p><p className="text-4xl font-extrabold text-emerald-600 mt-1">{usd(prize)}</p><p className="text-xs font-bold text-slate-500">added to your balance</p></>) : (<><p className="text-5xl">🍀</p><p className="text-xl font-extrabold text-slate-500 mt-1">No luck this time</p></>)}
-              </div>
-              <canvas ref={canvasRef} width={680} height={400} className="absolute inset-0 w-full h-full cursor-pointer" style={{ opacity: revealed ? 0 : 1, transition: 'opacity .4s' }} onPointerDown={scratchAt} onPointerMove={e => { if (e.buttons & 1) scratchAt(e) }} onPointerUp={checkReveal} onPointerLeave={checkReveal} />
-            </div>
-            <p className="text-xs text-slate-400 text-center mt-3">Scratch the cover with your finger or mouse to reveal the prize. The prize is credited to your balance as soon as the card is drawn.</p>
-            {revealed && left > 0 && <Btn className="w-full py-3.5 mt-3" onClick={draw}>Next card ({left} left)</Btn>}
-            {revealed && left <= 0 && <p className="text-center font-bold text-slate-500 mt-3">That was today's last card.</p>}
-          </>
-        )}
       </Card>
       <EarnHistory />
     </div>
@@ -363,78 +330,3 @@ export function TasksPage() {
   )
 }
 
-/* ---------------- Daily Quiz ---------------- */
-export function QuizPage() {
-  const { earnInfo, submitQuiz, toast, db } = useApp()
-  const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
-  const info = earnInfo()
-  const playedToday = info.quizDay === todayStr()
-  const [i, setI] = useState(0)
-  const [picked, setPicked] = useState<number | null>(null)
-  const [finished, setFinished] = useState(false)
-  const [earned, setEarned] = useState(0)
-  const scoreRef = useRef(0)
-  const submitted = useRef(false)
-  const pick = (opt: number) => {
-    if (picked !== null) return
-    setPicked(opt)
-    if (opt === QUIZ[i].answer) scoreRef.current += 1
-    setTimeout(async () => {
-      setPicked(null)
-      if (i + 1 < QUIZ.length) setI(i + 1)
-      else {
-        setFinished(true)
-        if (!submitted.current) {
-          submitted.current = true
-          const r = await submitQuiz(scoreRef.current)
-          if (r.err) toast({ kind: 'error', title: r.err })
-          else { setEarned(r.amount ?? 0); if ((r.amount ?? 0) > 0) toast({ kind: 'success', title: '+' + usd(r.amount ?? 0) + ' quiz reward added' }) }
-        }
-      }
-    }, 950)
-  }
-  if (playedToday && !finished) return (
-    <div>
-      <BackLink />
-      <PageHead title="Daily Quiz" sub={`Answer 5 questions — earn ${usd(4)} for every correct answer.`} />
-      <EarnSummary />
-      <Card className="p-8 text-center"><p className="text-4xl">🧠</p><p className="font-extrabold mt-2">You've played today's quiz</p><p className="text-sm text-slate-400 mt-1">A new quiz arrives tomorrow. Check the other Earn options meanwhile!</p></Card>
-      <EarnHistory />
-    </div>
-  )
-  if (finished) return (
-    <div>
-      <BackLink />
-      <PageHead title="Daily Quiz" sub={`Answer 5 questions — earn ${usd(4)} for every correct answer.`} />
-      <EarnSummary />
-      <Card className="p-8 text-center">
-        <p className="text-5xl">{scoreRef.current >= 4 ? '🏆' : scoreRef.current >= 2 ? '🎉' : '💪'}</p>
-        <p className="font-extrabold text-xl mt-2">You scored {scoreRef.current} / {QUIZ.length}</p>
-        <p className="text-sm text-slate-400 mt-1">{earned > 0 ? usd(earned) + ' was added to your balance.' : 'No reward this time — try again tomorrow.'}</p>
-      </Card>
-      <EarnHistory />
-    </div>
-  )
-  const q = QUIZ[i]
-  return (
-    <div>
-      <BackLink />
-      <PageHead title="Daily Quiz" sub={`Answer 5 questions — earn ${usd(4)} for every correct answer.`} />
-      <EarnSummary />
-      <Card className="p-5">
-        <div className="flex justify-between text-xs font-bold text-slate-400 mb-2"><span>Question {i + 1} of {QUIZ.length}</span><span>Score: {scoreRef.current}</span></div>
-        <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-4"><div className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 transition-all" style={{ width: ((i) / QUIZ.length) * 100 + '%' }} /></div>
-        <p className="font-extrabold text-lg mb-4">{q.q}</p>
-        <div className="space-y-2">
-          {q.options.map((opt, oi) => {
-            const isAnswer = oi === q.answer
-            const isPicked = picked === oi
-            const cls = picked === null ? 'border-slate-200 dark:border-slate-700 hover:border-violet-400' : isAnswer ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : isPicked ? 'border-rose-500 bg-rose-50 dark:bg-rose-500/10' : 'border-slate-200 dark:border-slate-700 opacity-60'
-            return <button key={oi} onClick={() => pick(oi)} className={`w-full text-left rounded-2xl border-2 px-4 py-3 font-bold text-sm transition ${cls}`}>{opt}{picked !== null && isAnswer ? ' ✓' : ''}{picked !== null && isPicked && !isAnswer ? ' ✕' : ''}</button>
-          })}
-        </div>
-      </Card>
-      <EarnHistory />
-    </div>
-  )
-}

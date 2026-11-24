@@ -1195,7 +1195,9 @@ async function handleEarnClaim(request, env, auth, body) {
   } catch (e) {
     return json(request, { error: "Claim failed: " + String(e?.message || e) }, 500);
   }
-  return json(request, { ok: true, state: await loadState(db, auth.uid) });
+  // Lite state on purpose: the full state (content, tickets, notifications)
+  // made the reward toast arrive seconds late on mobile connections.
+  return json(request, { ok: true, state: await loadState(db, auth.uid, true) });
 }
 
 // ---- Phase 3: content, tickets, levels, notifications, RBAC --------------------

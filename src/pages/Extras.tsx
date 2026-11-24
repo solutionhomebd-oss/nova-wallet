@@ -4,7 +4,7 @@ import { ArrowLeftRight, Award, BadgePercent, Coins, Globe, Nfc, Snowflake, Spar
 import LogoMark from '../components/LogoMark'
 import { useApp } from '../lib/store'
 import { withdrawMethods, CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
-import { ADS_PER_DAY, EARN_TASKS, SCRATCH_PER_DAY, SPINS_PER_DAY } from '../lib/earn'
+import { ADS_PER_DAY, EARN_TASKS, SPINS_PER_DAY } from '../lib/earn'
 import { COIN_META, useMarket } from '../lib/market'
 import { Badge, Btn, Card, Empty, FeatureOff, Input, MaxBtn, Modal, Select, TxDirIcon , StepBar, StepUpField, WizardNav } from '../components/ui'
 import { fmtDateTime, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
@@ -144,9 +144,7 @@ export function EarnPage() {
     { to: '/earn/checkin', icon: '📅', title: 'Daily Check-in', sub: 'Up to ' + usd(50) + ' a day', badge: einfo.lastCheckin === todayL ? '✓ Claimed' : 'Claim now' },
     { to: '/earn/ads', icon: '📺', title: 'View Ads', sub: usd(2) + '–' + usd(8) + ' per ad', badge: (ADS_PER_DAY - einfo.ads) + ' left today' },
     { to: '/earn/spin', icon: '🎡', title: 'Spin Wheel', sub: 'Win up to ' + usd(50), badge: (SPINS_PER_DAY - einfo.spins) + ' spins left' },
-    { to: '/earn/scratch', icon: '🎫', title: 'Scratch Card', sub: 'Win up to ' + usd(50), badge: (SCRATCH_PER_DAY - einfo.scratches) + ' cards left' },
     { to: '/earn/tasks', icon: '✅', title: 'Complete Tasks', sub: 'Simple tasks, real rewards', badge: (EARN_TASKS.length - einfo.tasksDone.length) + ' open' },
-    { to: '/earn/quiz', icon: '🧠', title: 'Daily Quiz', sub: usd(4) + ' per correct answer', badge: einfo.quizDay === todayL ? 'Played today' : 'Play now' },
   ]
   return (
     <div>

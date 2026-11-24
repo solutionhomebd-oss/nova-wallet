@@ -41,8 +41,6 @@ const InstallPage = lazyNamed(() => import('./pages/Extras'), 'InstallPage')
 const SwapPage = lazyNamed(() => import('./pages/Extras'), 'SwapPage')
 const AdsPage = lazyNamed(() => import('./pages/EarnPages'), 'AdsPage')
 const CheckinPage = lazyNamed(() => import('./pages/EarnPages'), 'CheckinPage')
-const QuizPage = lazyNamed(() => import('./pages/EarnPages'), 'QuizPage')
-const ScratchPage = lazyNamed(() => import('./pages/EarnPages'), 'ScratchPage')
 const SpinPage = lazyNamed(() => import('./pages/EarnPages'), 'SpinPage')
 const TasksPage = lazyNamed(() => import('./pages/EarnPages'), 'TasksPage')
 const NewsDetail = lazyNamed(() => import('./pages/TransactionsNews'), 'NewsDetail')
@@ -199,9 +197,7 @@ export default function App() {
             <Route path="/earn/checkin" element={<CheckinPage />} />
             <Route path="/earn/ads" element={<AdsPage />} />
             <Route path="/earn/spin" element={<SpinPage />} />
-            <Route path="/earn/scratch" element={<ScratchPage />} />
             <Route path="/earn/tasks" element={<TasksPage />} />
-            <Route path="/earn/quiz" element={<QuizPage />} />
             <Route path="/swap" element={<SwapPage />} />
                         <Route path="/referral" element={<Referral />} />
             <Route path="/loan" element={<LoanPage view="hub" />} />

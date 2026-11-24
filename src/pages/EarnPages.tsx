@@ -102,15 +102,27 @@ export function CheckinPage() {
   )
 }
 
-/* ---------------- View Ads (Adsterra Social Bar) ---------------- */
-const ADSTERRA_SRC = 'https://bauval.org/14/7c17e31427e859c5ec533673c9ad0aa2'
-function loadAdsterra() {
-  if (document.querySelector('script[src="' + ADSTERRA_SRC + '"]')) return
-  const s = document.createElement('script')
-  s.src = ADSTERRA_SRC
-  s.async = true
-  s.setAttribute('data-cfasync', 'false')
-  document.body.appendChild(s)
+/* ---------------- View Ads (Adsterra Banner 300x250, in-card) ---------------- */
+function AdsterraBanner() {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || el.dataset.loaded) return
+    el.dataset.loaded = '1'
+    ;(window as unknown as { atOptions?: unknown }).atOptions = {
+      key: 'dfa6ed35125429e4aa96f8b0a2ae7b6b',
+      format: 'iframe',
+      height: 250,
+      width: 300,
+      params: {},
+    }
+    const s = document.createElement('script')
+    s.src = 'https://bauval.org/22/dfa6ed35125429e4aa96f8b0a2ae7b6b'
+    s.async = true
+    s.setAttribute('data-cfasync', 'false')
+    el.appendChild(s)
+  }, [])
+  return <div ref={ref} className="w-[300px] max-w-full min-h-[250px]" />
 }
 export function AdsPage() {
   const { earnInfo, watchAdReward, toast, db } = useApp()
@@ -120,7 +132,6 @@ export function AdsPage() {
   const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>('idle')
   const [progress, setProgress] = useState(0)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
-  useEffect(() => { loadAdsterra() }, [])
   useEffect(() => () => { if (timer.current) clearInterval(timer.current) }, [])
   const watch = () => {
     setPhase('watching'); setProgress(0)
@@ -143,11 +154,12 @@ export function AdsPage() {
       <PageHead title="View Ads" sub={`Watch a short ad and earn ${usd(2)}–${usd(8)} each time. ${left} of ${ADS_PER_DAY} left today.`} />
       <EarnSummary />
       <Card className="p-5">
-        <div className="rounded-3xl bg-gradient-to-br from-violet-600 to-cyan-500 text-white p-6 min-h-[180px] flex flex-col justify-between overflow-hidden relative">
-          <div><p className="text-[11px] font-bold uppercase tracking-widest opacity-80">Advertisement</p><p className="text-4xl mt-3">📣</p></div>
-          <p className="font-extrabold text-lg leading-snug">{phase === 'watching' ? 'Your ad is playing — keep this page open…' : 'A short ad from our sponsor plays here. Watch it fully, then claim your reward.'}</p>
-          {phase === 'watching' && <div className="absolute inset-x-0 bottom-0 h-1.5 bg-black/25"><div className="h-full bg-white transition-all" style={{ width: progress + '%' }} /></div>}
+        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 text-center">Advertisement</p>
+        <div className="relative mt-3 rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-800/60 min-h-[250px] flex items-center justify-center">
+          <AdsterraBanner />
+          {phase === 'watching' && <div className="absolute inset-x-0 bottom-0 h-1.5 bg-black/25"><div className="h-full bg-violet-500 transition-all" style={{ width: progress + '%' }} /></div>}
         </div>
+        {phase === 'watching' && <p className="text-center text-xs font-bold text-slate-400 mt-2">Your ad is playing — keep this page open…</p>}
         <div className="mt-4"><Pips total={ADS_PER_DAY} used={info.ads} /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.ads} of {ADS_PER_DAY} ads watched today</p></div>
         {phase === 'watching' && <p className="text-center text-sm font-bold text-slate-500 mt-4">Watching ad… {Math.ceil((100 - progress) / 10)}s</p>}
         {phase === 'idle' && <Btn className="w-full py-3.5 mt-4" disabled={left <= 0} onClick={watch}>{left <= 0 ? 'No ads left today' : '▶ Watch ad (10s)'}</Btn>}

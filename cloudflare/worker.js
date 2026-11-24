@@ -452,6 +452,7 @@ async function loadState(db, uid, lite = false) {
       ...(l.fee_status ? { feeStatus: l.fee_status } : {}),
       ...(l.fee_method ? { feeMethod: l.fee_method } : {}),
       ...(l.fee_tx_ref ? { feeTxRef: l.fee_tx_ref } : {}),
+      ...(l.auto_checks ? { autoChecks: parseAiJson(l.auto_checks) } : {}),
     })),
     stakes: stkRows.results.map((s) => ({
       id: s.id, userId: s.user_id, amount: Number(s.amount), apy: Number(s.apy),
@@ -478,7 +479,8 @@ async function loadDirectory(db, includePhone = false) {
        (SELECT status FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_status,
        (SELECT doc_type FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_type,
        (SELECT doc_number FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_doc_number,
-       (SELECT created_at FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_created_at
+       (SELECT created_at FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_created_at,
+       (SELECT auto_checks FROM kyc_submissions WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) AS kyc_auto_checks
        FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id ORDER BY u.created_at ASC`
   ).all();
   return rows.results.map((u) => ({
@@ -490,7 +492,7 @@ async function loadDirectory(db, includePhone = false) {
     pinFailCount: Number(u.pin_fail_count || 0), ...(u.pin_locked_until ? { pinLockedUntil: u.pin_locked_until } : {}),
     createdAt: isoOf(u.created_at),
     kyc: u.kyc_status || "unverified",
-    ...(u.kyc_status ? { kycDocType: u.kyc_doc_type, kycDocNumber: u.kyc_doc_number, kycSubmittedAt: isoOf(u.kyc_created_at) } : {}),
+    ...(u.kyc_status ? { kycDocType: u.kyc_doc_type, kycDocNumber: u.kyc_doc_number, kycSubmittedAt: isoOf(u.kyc_created_at), ...(u.kyc_auto_checks ? { kycAutoChecks: parseAiJson(u.kyc_auto_checks) } : {}) } : {}),
   }));
 }
 
@@ -1083,6 +1085,7 @@ async function handleLoanApply(request, env, auth, body) {
   } catch (e) {
     return json(request, { error: "Loan application failed: " + String(e?.message || e) }, 500);
   }
+  deferBg(runLoanAutoChecks(env, db, id));
   await notifyAdminsServer(db, "loan", "🏦 New loan application", "A loan application of " + amount + " is waiting for review.", "/admin?tab=loans");
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
@@ -2092,6 +2095,184 @@ async function handleAdminBackup(request, env, auth) {
 // face_url). The latest row's status IS the user's KYC status — state and
 // directory expose the status + document meta, photos are served only by
 // the admin review endpoint so state pulls stay light.
+// ---- AI auto-checks (flag-only) ----------------------------------------------
+// After a KYC submission or a loan application lands, a vision model reads
+// the document photo (name + number + is it really an ID), compares the
+// document face with the selfie, and stores verdicts on the row. FLAG-ONLY:
+// nothing is approved or rejected by AI — the admin decides, with the flags
+// in front of them. Any AI failure records {error:"unavailable"} and the
+// normal manual flow continues untouched.
+const AI_VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
+const EXTRACT_PROMPT = "This is a photo of an identity document. Extract: (1) the person's full name exactly as printed, (2) the document number exactly as printed, (3) whether the image really shows an identity document (national ID card, passport or driving licence) as opposed to a screenshot, a random photo or something else. Reply with JSON only, no other text: {\"name\": \"...\", \"number\": \"...\", \"is_id_document\": true}";
+const FACE_DESC_PROMPT = "Describe the person's face in this image. Reply with JSON only, no other text: {\"gender\": \"male or female\", \"age\": \"teens/20s/30s/40s/50+\", \"beard\": \"none/light/full\", \"glasses\": true, \"hair\": \"short/long/bald\"}. If there is no clear human face, reply {\"no_face\": true}.";
+// Face checking is attribute-based: the vision runtime takes ONE image per
+// call and the face printed on a document is too small for a reliable
+// side-by-side match, so each photo is described separately (single-image
+// calls are accurate) and the attributes are compared in code. This catches
+// the common fraud — somebody else's document with your selfie — while
+// staying honest: it is a flag for the admin, not biometrics.
+async function describeFace(env, dataUrl) {
+  const j = await aiVision(env, [
+    { type: "text", text: FACE_DESC_PROMPT },
+    { type: "image_url", image_url: { url: dataUrl } },
+  ]);
+  if (!j) return null;
+  if (j.no_face) return { noFace: true };
+  const beardRaw = String(j.beard || "").toLowerCase();
+  const ageRaw = String(j.age || "").toLowerCase();
+  const hairRaw = String(j.hair || "").toLowerCase();
+  const gRaw = String(j.gender || "").toLowerCase();
+  return {
+    gender: gRaw.includes("female") ? "female" : gRaw.includes("male") ? "male" : "",
+    ageBand: ageRaw.includes("teen") ? 0 : ageRaw.includes("20") ? 1 : ageRaw.includes("30") ? 2 : ageRaw.includes("40") ? 3 : ageRaw.includes("50") || ageRaw.includes("60") ? 4 : -1,
+    beard: beardRaw.includes("full") || beardRaw.includes("long") || beardRaw.includes("heavy") ? 2 : beardRaw.includes("none") || beardRaw.includes("clean") || beardRaw.includes("no") ? 0 : 1,
+    glasses: j.glasses === true,
+    hair: hairRaw.includes("bald") ? "bald" : hairRaw.includes("long") ? "long" : "short",
+  };
+}
+function faceSummary(a) {
+  if (!a) return "";
+  if (a.noFace) return "no face seen";
+  const age = ["teens", "20s", "30s", "40s", "50+"][a.ageBand] || "?";
+  return [a.gender || "?", age, a.beard === 2 ? "full beard" : a.beard === 1 ? "light beard" : "no beard", a.glasses ? "glasses" : "no glasses", a.hair + " hair"].join(", ");
+}
+function faceVerdictFromAttrs(doc, selfie) {
+  if (!doc || !selfie) return null;
+  if (doc.noFace || selfie.noFace) return { verdict: "no_face", note: doc.noFace ? "No clear face on the document photo" : "No clear face in the selfie" };
+  if (doc.gender && selfie.gender && doc.gender !== selfie.gender) return { verdict: "mismatch", note: "Gender differs between document and selfie" };
+  let strong = 0, weak = 0; const notes = [];
+  const beardDelta = Math.abs(doc.beard - selfie.beard);
+  if (beardDelta === 2) { strong++; notes.push("beard differs (document: " + (doc.beard === 2 ? "full" : "none") + ", selfie: " + (selfie.beard === 2 ? "full" : "none") + ")"); }
+  else if (beardDelta === 1) weak++;
+  if (doc.ageBand >= 0 && selfie.ageBand >= 0 && Math.abs(doc.ageBand - selfie.ageBand) >= 2) { strong++; notes.push("age looks very different"); }
+  if (doc.glasses !== selfie.glasses) { weak++; notes.push("glasses differ"); }
+  if (doc.hair !== selfie.hair) weak++;
+  if (strong >= 1 && strong + weak >= 2) return { verdict: "mismatch", note: notes.join("; ") };
+  if (strong === 1 || weak >= 2) return { verdict: "uncertain", note: notes.join("; ") || "Some features differ" };
+  return { verdict: "match", note: "" };
+}
+function parseAiJson(v) {
+  if (v && typeof v === "object") return v;
+  if (typeof v !== "string") return null;
+  const m = v.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
+}
+async function aiVision(env, parts) {
+  if (!env.AI) return null;
+  try {
+    const r = await env.AI.run(AI_VISION_MODEL, { messages: [{ role: "user", content: parts }] });
+    return parseAiJson(r?.response);
+  } catch { return null; }
+}
+const nameTokens = (x) => String(x || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean)
+  .map(t => (t === "md" || t === "mohammed" || t === "mohamed" || t === "muhammad") ? "mohammad" : t)
+  .filter(t => !["mr", "mrs", "mst", "miss"].includes(t));
+function nameVerdict(extracted, expected) {
+  const a = nameTokens(extracted), b = nameTokens(expected);
+  if (!a.length || !b.length) return "unknown";
+  const setB = new Set(b);
+  const hit = a.filter(t => setB.has(t)).length;
+  const score = hit / Math.max(a.length, b.length);
+  return score >= 0.99 ? "match" : score >= 0.5 ? "partial" : "mismatch";
+}
+async function extractFromDoc(env, docDataUrl) {
+  const j = await aiVision(env, [
+    { type: "text", text: EXTRACT_PROMPT },
+    { type: "image_url", image_url: { url: docDataUrl } },
+  ]);
+  if (!j) return null;
+  return {
+    extractedName: String(j.name || "").slice(0, 80),
+    extractedNumber: String(j.number || "").slice(0, 60),
+    docGenuine: j.is_id_document === true ? "yes" : j.is_id_document === false ? "no" : "unknown",
+  };
+}
+async function runKycAutoChecks(env, db, subId) {
+  const checks = { ranAt: new Date().toISOString() };
+  try {
+    const sub = await db.prepare("SELECT * FROM kyc_submissions WHERE id = ?").bind(subId).first();
+    if (!sub) return;
+    const prof = await db.prepare("SELECT full_name FROM user_profiles WHERE user_id = ?").bind(sub.user_id).first();
+    let any = false;
+    if (sub.doc_url) {
+      let ext = await extractFromDoc(env, sub.doc_url);
+      if (!ext) ext = await extractFromDoc(env, sub.doc_url);
+      if (ext) {
+        any = true;
+        Object.assign(checks, ext);
+        checks.numberMatch = ext.extractedNumber ? (normDocNumber(ext.extractedNumber) === normDocNumber(sub.doc_number) ? "match" : "mismatch") : "unknown";
+        checks.nameMatch = nameVerdict(ext.extractedName, prof?.full_name || "");
+      }
+    }
+    if (sub.doc_url && sub.face_url) {
+      let fv = null, docFace = null, selfieFace = null;
+      for (let attempt = 0; attempt < 2 && !fv; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 2500)); // burst throttling made back-to-back retries fail together
+        docFace = await describeFace(env, sub.doc_url);
+        selfieFace = await describeFace(env, sub.face_url);
+        fv = faceVerdictFromAttrs(docFace, selfieFace);
+      }
+      if (fv) {
+        any = true;
+        checks.faceMatch = fv.verdict;
+        if (fv.note) checks.faceNote = fv.note;
+        checks.faceDoc = faceSummary(docFace);
+        checks.faceSelfie = faceSummary(selfieFace);
+      } else {
+        checks.faceMatch = "uncertain";
+        checks.faceNote = "Face check could not be completed — compare the photos manually";
+      }
+    }
+    if (!any) checks.error = "unavailable";
+  } catch { checks.error = "unavailable"; }
+  try { await db.prepare("UPDATE kyc_submissions SET auto_checks = ? WHERE id = ?").bind(JSON.stringify(checks), subId).run(); } catch { /* column may lag on old deploys */ }
+}
+async function runLoanAutoChecks(env, db, loanId) {
+  const checks = { ranAt: new Date().toISOString() };
+  try {
+    const loan = await db.prepare("SELECT * FROM loans WHERE id = ?").bind(loanId).first();
+    if (!loan) return;
+    let info = {};
+    try { info = JSON.parse(loan.info || "{}"); } catch { /* ignore */ }
+    const kyc = await db.prepare("SELECT doc_number FROM kyc_submissions WHERE user_id = ? AND status = 'verified' ORDER BY created_at DESC LIMIT 1").bind(loan.user_id).first();
+    checks.kycVerified = !!kyc;
+    if (kyc && info.nid) checks.kycNumberMatch = normDocNumber(info.nid) === normDocNumber(kyc.doc_number) ? "match" : "mismatch";
+    let any = false;
+    if (info.idPhoto) {
+      let ext = await extractFromDoc(env, info.idPhoto);
+      if (!ext) ext = await extractFromDoc(env, info.idPhoto);
+      if (ext) {
+        any = true;
+        Object.assign(checks, ext);
+        checks.numberMatch = ext.extractedNumber && info.nid ? (normDocNumber(ext.extractedNumber) === normDocNumber(info.nid) ? "match" : "mismatch") : "unknown";
+        checks.nameMatch = nameVerdict(ext.extractedName, info.applicantName || "");
+      }
+    }
+    if (info.idPhoto && info.photo) {
+      let fv = null, docFace = null, selfieFace = null;
+      for (let attempt = 0; attempt < 2 && !fv; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 2500)); // burst throttling made back-to-back retries fail together
+        docFace = await describeFace(env, info.idPhoto);
+        selfieFace = await describeFace(env, info.photo);
+        fv = faceVerdictFromAttrs(docFace, selfieFace);
+      }
+      if (fv) {
+        any = true;
+        checks.faceMatch = fv.verdict;
+        if (fv.note) checks.faceNote = fv.note;
+        checks.faceDoc = faceSummary(docFace);
+        checks.faceSelfie = faceSummary(selfieFace);
+      } else {
+        checks.faceMatch = "uncertain";
+        checks.faceNote = "Face check could not be completed — compare the photos manually";
+      }
+    }
+    if (!any && !kyc) checks.error = "unavailable";
+  } catch { checks.error = "unavailable"; }
+  try { await db.prepare("UPDATE loans SET auto_checks = ? WHERE id = ?").bind(JSON.stringify(checks), loanId).run(); } catch { /* ignore */ }
+}
+
 // ---- KYC hardening (Tier 1) -------------------------------------------------
 // Document numbers are compared normalized (case/space/dash-insensitive), so
 // the same document cannot slip onto a second account with different spacing.
@@ -2205,6 +2386,7 @@ async function handleKycSubmit(request, env, auth, body) {
   const id = pubId("KYC");
   await db.prepare("INSERT INTO kyc_submissions (id, user_id, doc_type, doc_number, doc_url, face_url, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')")
     .bind(id, auth.uid, docType, docNumber, docPhoto, facePhoto).run();
+  deferBg(runKycAutoChecks(env, db, id));
   await notifyAdminsServer(db, "security", "🪪 New KYC submission", "A user submitted KYC documents (" + docType + ") for review.", "/admin?tab=kyc");
   return json(request, { ok: true, state: await loadState(db, auth.uid) });
 }
@@ -2223,6 +2405,7 @@ async function handleAdminKycGet(request, env, auth, targetUid) {
     kyc: {
       status: row.status, docType: row.doc_type, docNumber: row.doc_number,
       docPhoto: row.doc_url, facePhoto: row.face_url, submittedAt: isoOf(row.created_at),
+      ...(row.auto_checks ? { autoChecks: parseAiJson(row.auto_checks) } : {}),
     },
   });
 }

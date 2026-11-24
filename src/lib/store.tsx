@@ -402,7 +402,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const stubFrom = (su: any): User => ({
     id: su.id, fbUid: su.id, stub: true, name: su.name || su.username, username: su.username, email: su.email,
     phone: su.phone ?? '', passwordHash: '', pinHash: '', role: su.role, status: su.status, kyc: su.kyc ?? 'unverified',
-    ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt } : {}),
+    ...(su.kycDocType ? { kycDocType: su.kycDocType, kycDocNumber: su.kycDocNumber, kycSubmittedAt: su.kycSubmittedAt, ...(su.kycAutoChecks ? { kycAutoChecks: su.kycAutoChecks } : {}) } : {}),
     ...(su.adminScope ? { adminScope: su.adminScope } : {}),
     ...(su.pinFailCount !== undefined ? { pinFailCount: su.pinFailCount } : {}), ...(su.pinLockedUntil ? { pinLockedUntil: su.pinLockedUntil } : {}),
     referralCode: su.referralCode || '', novaAddress: su.novaAddress || '', ...(su.registrationCountry ? { registrationCountry: su.registrationCountry } : {}), referredBy: null, twoFA: false, level: su.level || 1, language: 'en',
@@ -432,7 +432,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         existing.status = su.status ?? existing.status
         existing.role = su.role ?? existing.role
         if (su.adminScope) existing.adminScope = su.adminScope; else if (existing.role !== 'admin') delete existing.adminScope
-        if (su.kycDocType) { existing.kycDocType = su.kycDocType; existing.kycDocNumber = su.kycDocNumber; existing.kycSubmittedAt = su.kycSubmittedAt }
+        if (su.kycDocType) { existing.kycDocType = su.kycDocType; existing.kycDocNumber = su.kycDocNumber; existing.kycSubmittedAt = su.kycSubmittedAt; if (su.kycAutoChecks) existing.kycAutoChecks = su.kycAutoChecks }
         if (su.pinFailCount !== undefined) existing.pinFailCount = su.pinFailCount
         if (su.novaAddress) existing.novaAddress = su.novaAddress
         if (su.registrationCountry) existing.registrationCountry = su.registrationCountry

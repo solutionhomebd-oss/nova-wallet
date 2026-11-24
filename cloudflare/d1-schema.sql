@@ -148,7 +148,7 @@ CREATE TABLE loans (
   user_id TEXT NOT NULL REFERENCES users(id), principal NUMERIC NOT NULL,
   rate_pct NUMERIC NOT NULL, months INTEGER NOT NULL, emi NUMERIC NOT NULL,
   total_payable NUMERIC NOT NULL, paid NUMERIC NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending','processing','completed','approved','rejected','active','repaid')), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending','processing','completed','approved','rejected','active','repaid')), created_at TEXT NOT NULL DEFAULT (datetime('now')), auto_checks TEXT
 );
 CREATE TABLE loan_repayments (
   id TEXT PRIMARY KEY,
@@ -180,6 +180,7 @@ CREATE TABLE notifications (
 CREATE TABLE kyc_submissions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
   doc_type TEXT NOT NULL, doc_number TEXT NOT NULL, doc_url TEXT,
+  auto_checks TEXT,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('unverified','pending','verified')), reviewed_by TEXT REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

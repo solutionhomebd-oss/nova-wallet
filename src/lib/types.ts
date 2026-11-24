@@ -24,8 +24,20 @@ export interface User {
       login target. */
   stub?: boolean
   payMethods?: { id: string; type: 'bank' | 'crypto'; label: string; detail: string }[]
-  language: string; currency?: string; photo?: string; kycDocType?: string; kycDocNumber?: string; kycDocPhoto?: string; kycFacePhoto?: string; kycSubmittedAt?: string; resetOtpHash?: string; resetOtpExpires?: number; createdAt: string; lastLogin: string
+  language: string; currency?: string; photo?: string; kycDocType?: string; kycDocNumber?: string; kycDocPhoto?: string; kycFacePhoto?: string; kycSubmittedAt?: string; kycAutoChecks?: AutoChecks; resetOtpHash?: string; resetOtpExpires?: number; createdAt: string; lastLogin: string
   sessions: { id: string; device: string; at: string; current: boolean }[]
+}
+/** Server-side AI auto-check verdicts (flag-only — an admin always decides).
+    Produced by the Worker after a KYC submission or a loan application. */
+export interface AutoChecks {
+  ranAt?: string; error?: string
+  extractedName?: string; extractedNumber?: string
+  docGenuine?: 'yes' | 'no' | 'unknown'
+  numberMatch?: 'match' | 'mismatch' | 'unknown'
+  nameMatch?: 'match' | 'partial' | 'mismatch' | 'unknown'
+  faceMatch?: 'match' | 'mismatch' | 'uncertain' | 'no_face'
+  faceNote?: string; faceDoc?: string; faceSelfie?: string
+  kycVerified?: boolean; kycNumberMatch?: 'match' | 'mismatch'
 }
 export interface Wallet { userId: string; available: number; locked: number; holdings: Record<string, number> }
 export interface Tx {
@@ -56,6 +68,7 @@ export interface Loan {
   idType?: string; idPhoto?: string
   guarantorName?: string; guarantorPhone?: string
   processingFee?: number; feeStatus?: 'unpaid' | 'submitted' | 'paid'; feeMethod?: string; feeTxRef?: string
+  autoChecks?: AutoChecks
 }
 export interface LoanInfo { applicantName: string; phone: string; whatsapp: string; nid: string; photo: string; guarantorName: string; guarantorPhone: string; idType: string; idPhoto: string }
 

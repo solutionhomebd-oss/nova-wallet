@@ -9,9 +9,44 @@ import LogoLoader, { PageLoader } from '../components/LogoLoader'
 import { fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
-import type { PayMethod } from '../lib/types'
+import type { AutoChecks, PayMethod } from '../lib/types'
 
 import { TABS, SCOPE_TABS, AdminMenuNav } from '../components/AdminShell'
+
+
+/** AI auto-check verdicts (flag-only): the server reads the document and
+    compares faces after each KYC submission / loan application. The admin
+    still decides — these chips just put the evidence in front of them. */
+function AutoCheckChips({ c, loan }: { c?: AutoChecks; loan?: boolean }) {
+  if (!c) return <p className="text-[11px] text-slate-400 mt-2">🤖 AI auto-check pending…</p>
+  if (c.error) return <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 mt-2">🤖 AI check unavailable — review the documents manually</p>
+  const tone = (t: 'good' | 'bad' | 'warn' | 'flat') => t === 'good'
+    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+    : t === 'bad' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'
+    : t === 'warn' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+    : 'bg-slate-200/70 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
+  const chip = (t: 'good' | 'bad' | 'warn' | 'flat', text: string, key: number) => <span key={key} className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${tone(t)}`}>{text}</span>
+  const items: [ 'good' | 'bad' | 'warn' | 'flat', string ][] = []
+  if (loan) {
+    if (c.kycVerified === false) items.push(['warn', 'No verified KYC'])
+    if (c.kycNumberMatch) items.push([c.kycNumberMatch === 'match' ? 'good' : 'bad', c.kycNumberMatch === 'match' ? 'NID ✓ matches verified KYC' : 'NID ⚠ differs from verified KYC'])
+  }
+  if (c.numberMatch) items.push([c.numberMatch === 'match' ? 'good' : c.numberMatch === 'mismatch' ? 'bad' : 'flat', 'Number ' + (c.numberMatch === 'match' ? '✓ matches' : c.numberMatch === 'mismatch' ? '⚠ differs from document' : '— unread')])
+  if (c.nameMatch) items.push([c.nameMatch === 'match' ? 'good' : c.nameMatch === 'partial' ? 'warn' : c.nameMatch === 'mismatch' ? 'bad' : 'flat', 'Name ' + (c.nameMatch === 'match' ? '✓ matches' : c.nameMatch === 'partial' ? '~ partly matches' : c.nameMatch === 'mismatch' ? '⚠ differs from document' : '— unread')])
+  if (c.faceMatch) items.push([c.faceMatch === 'match' ? 'good' : c.faceMatch === 'mismatch' ? 'bad' : 'warn', 'Face ' + (c.faceMatch === 'match' ? '✓ consistent' : c.faceMatch === 'mismatch' ? '⚠ different person' : c.faceMatch === 'no_face' ? '— no clear face' : '~ uncertain')])
+  if (c.docGenuine) items.push([c.docGenuine === 'yes' ? 'good' : c.docGenuine === 'no' ? 'bad' : 'flat', c.docGenuine === 'yes' ? 'Document ✓ looks genuine' : c.docGenuine === 'no' ? 'Document ⚠ may not be an ID' : 'Document — unclear'])
+  return (
+    <div className="mt-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400 mr-0.5">🤖 AI check</span>
+        {items.map(([t, text], i) => chip(t, text, i))}
+      </div>
+      {(c.extractedName || c.extractedNumber) && <p className="text-[11px] text-slate-400 mt-1">Document reads: <b className="text-slate-500 dark:text-slate-300">{c.extractedName || '—'}</b> · <span className="font-mono">{c.extractedNumber || '—'}</span></p>}
+      {c.faceDoc && <p className="text-[11px] text-slate-400 mt-0.5">Face on document: {c.faceDoc} · Selfie: {c.faceSelfie}</p>}
+      {c.faceNote && <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5">⚠ {c.faceNote}</p>}
+    </div>
+  )
+}
 
 export default function Admin() {
   const { user, db, decideDeposit, decideWithdraw, decideLoan, setLoanFee, confirmLoanFee, decideKyc, stepUp, txHold, txUnhold, txCancel, publishNews, deleteNews, updateSettings, toggleBanner, saveBanner, deleteBanner, moveBanner, toast, resetDemo, decideUpgrade, updateLevelDef, setUserLevel, markRead, markAllRead, broadcast, adminErrors } = useApp()
@@ -368,6 +403,7 @@ export default function Admin() {
                             <p className="text-xs text-slate-400 mt-0.5">📄 {docLabel(u.kycDocType)} · <span className="font-mono">{u.kycDocNumber ?? '—'}</span>{u.kycSubmittedAt ? ' · submitted ' + fmtDateTime(u.kycSubmittedAt) : ''}</p></div>
                           <Badge tone="amber">pending</Badge>
                         </div>
+                        <AutoCheckChips c={u.kycAutoChecks} />
                         {photos === undefined ? (
                           <Btn variant="outline" className="!py-2 !text-xs mt-3" onClick={() => loadKycPhotos(u)}>View documents & face photo</Btn>
                         ) : photos === 'loading' ? <div className="mt-3 flex items-center gap-2.5"><LogoLoader size={22} /><span className="text-xs text-slate-400">Loading photos…</span></div> : (
@@ -448,6 +484,7 @@ export default function Admin() {
                     </div>
                   </div>
                 )}
+                {(l.autoChecks || l.status === 'pending') && <AutoCheckChips c={l.autoChecks} loan />}
                 <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 px-3.5 py-3">
                   <p className="font-extrabold text-sm">Processing fee</p>
                   {l.processingFee ? <>

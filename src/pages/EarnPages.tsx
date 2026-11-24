@@ -102,12 +102,16 @@ export function CheckinPage() {
   )
 }
 
-/* ---------------- View Ads ---------------- */
-const DEMO_ADS = [
-  { brand: 'Nova Store', text: 'Mega Sale — up to 50% off electronics this week only!', emoji: '🛍️', grad: 'from-rose-500 to-orange-500' },
-  { brand: 'FlyTravel', text: 'Dhaka → Cox\'s Bazar return tickets from $41.31. Book now!', emoji: '✈️', grad: 'from-sky-500 to-cyan-400' },
-  { brand: 'Crypto Academy', text: 'Learn trading in 7 days — free beginner course inside.', emoji: '🎓', grad: 'from-violet-600 to-indigo-500' },
-]
+/* ---------------- View Ads (Adsterra Social Bar) ---------------- */
+const ADSTERRA_SRC = 'https://bauval.org/14/7c17e31427e859c5ec533673c9ad0aa2'
+function loadAdsterra() {
+  if (document.querySelector('script[src="' + ADSTERRA_SRC + '"]')) return
+  const s = document.createElement('script')
+  s.src = ADSTERRA_SRC
+  s.async = true
+  s.setAttribute('data-cfasync', 'false')
+  document.body.appendChild(s)
+}
 export function AdsPage() {
   const { earnInfo, watchAdReward, toast, db } = useApp()
   const usd = (bdt: number) => fmtUSDT(bdt / db.settings.bdtPerUsd)
@@ -115,10 +119,9 @@ export function AdsPage() {
   const left = ADS_PER_DAY - info.ads
   const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>('idle')
   const [progress, setProgress] = useState(0)
-  const [adIdx, setAdIdx] = useState(0)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => { loadAdsterra() }, [])
   useEffect(() => () => { if (timer.current) clearInterval(timer.current) }, [])
-  const ad = DEMO_ADS[adIdx % DEMO_ADS.length]
   const watch = () => {
     setPhase('watching'); setProgress(0)
     timer.current = setInterval(() => {
@@ -132,7 +135,7 @@ export function AdsPage() {
     const r = await watchAdReward()
     if (r.err) return toast({ kind: 'error', title: r.err })
     toast({ kind: 'success', title: 'Ad reward ✓', body: '+' + usd(r.amount ?? 0) + ' · ' + (r.left ?? 0) + ' ads left today · Added to your balance' })
-    setPhase('idle'); setProgress(0); setAdIdx(i => i + 1)
+    setPhase('idle'); setProgress(0)
   }
   return (
     <div>
@@ -140,9 +143,9 @@ export function AdsPage() {
       <PageHead title="View Ads" sub={`Watch a short ad and earn ${usd(2)}–${usd(8)} each time. ${left} of ${ADS_PER_DAY} left today.`} />
       <EarnSummary />
       <Card className="p-5">
-        <div className={`rounded-3xl bg-gradient-to-br ${ad.grad} text-white p-6 min-h-[180px] flex flex-col justify-between overflow-hidden relative`}>
-          <div><p className="text-[11px] font-bold uppercase tracking-widest opacity-80">Ad · {ad.brand}</p><p className="text-4xl mt-3">{ad.emoji}</p></div>
-          <p className="font-extrabold text-lg leading-snug">{ad.text}</p>
+        <div className="rounded-3xl bg-gradient-to-br from-violet-600 to-cyan-500 text-white p-6 min-h-[180px] flex flex-col justify-between overflow-hidden relative">
+          <div><p className="text-[11px] font-bold uppercase tracking-widest opacity-80">Advertisement</p><p className="text-4xl mt-3">📣</p></div>
+          <p className="font-extrabold text-lg leading-snug">{phase === 'watching' ? 'Your ad is playing — keep this page open…' : 'A short ad from our sponsor plays here. Watch it fully, then claim your reward.'}</p>
           {phase === 'watching' && <div className="absolute inset-x-0 bottom-0 h-1.5 bg-black/25"><div className="h-full bg-white transition-all" style={{ width: progress + '%' }} /></div>}
         </div>
         <div className="mt-4"><Pips total={ADS_PER_DAY} used={info.ads} /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.ads} of {ADS_PER_DAY} ads watched today</p></div>

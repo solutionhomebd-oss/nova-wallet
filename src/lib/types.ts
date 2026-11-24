@@ -13,7 +13,7 @@ export interface User {
   pinFailCount?: number; pinLockedUntil?: string
   passwordHash: string; pinHash: string; role: Role; status: UserStatus; kyc: KycStatus
   referralCode: string
-  novaAddress?: string; registrationCountry?: string; appBonusAt?: string; cardWishlistJoined?: boolean; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
+  novaAddress?: string; registrationCountry?: string; appBonusAt?: string; cardWishlistJoined?: boolean; referralCount?: number; referralTotal?: number; referralEarningsBdt?: number; hasDeposited?: boolean; referredBy: string | null; twoFA: boolean; level: number; loanLimitOverride?: number
   /** Firebase UID once the account is linked to the backend (Phase 1+). */
   fbUid?: string
   /** RBAC scope for admin accounts (server-side, D1 users.admin_scope):
@@ -138,5 +138,6 @@ export interface DB {
   sessions: SessionInfo[]
   levels: LevelDef[]; levelRequests: LevelRequest[]; stakes: Stake[]; earnStates: EarnState[]; sec: Record<string, { fails: number; lockedUntil: number }>
   watchlist: Record<string, string[]>; referralEarnings: { id: string; userId: string; fromUser: string; amount: number; createdAt: string }[]
+  myReferrals: { id: string; name: string; username: string; createdAt: string }[]; referralLeaders: { id: string; name: string; count: number; earnedBdt: number }[]
   wishlist: WishlistEntry[]
 }

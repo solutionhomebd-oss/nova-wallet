@@ -402,7 +402,7 @@ export default function Auth({ initialMode = 'landing' }: { initialMode?: 'landi
               <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-500/20 px-4 py-3">
                 <p className="text-xs text-amber-700 dark:text-amber-200 leading-relaxed">⚠️ <b>Remember this PIN forever.</b> Your transaction PIN can <b>never be changed</b> after registration — you will need it for every send, cash out and loan action. Pick one you will always remember, and never share it with anyone.</p>
               </div>
-              <Input label={t('referral_code_opt')} placeholder="NOVA-XXXXX" value={form.referralCode} onChange={set('referralCode')} />
+              <Input label={t('referral_code_opt')} placeholder="NWXXXXXXXX" value={form.referralCode} onChange={set('referralCode')} />
               {TURNSTILE_SITE_KEY && <div ref={tsRef} className="flex justify-center" />}
               <Btn className="w-full py-3.5" disabled={regBusy} onClick={startRegister}>{regBusy ? <Loader2 size={17} className="animate-spin" /> : t('create_account')}</Btn>
               <p className="text-[11px] text-center text-slate-400 leading-relaxed">{t('join_pre')} <Link to="/terms" className="font-bold text-violet-600 dark:text-violet-400 underline underline-offset-2">{t('join_terms_word')}</Link> {t('join_and')} <Link to="/privacy" className="font-bold text-violet-600 dark:text-violet-400 underline underline-offset-2">{t('join_privacy_word')}</Link>{t('join_post')}</p>

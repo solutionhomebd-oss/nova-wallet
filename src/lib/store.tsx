@@ -523,9 +523,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (state.profile.registrationCountry) lu.registrationCountry = state.profile.registrationCountry
       if (state.profile.appBonusAt) lu.appBonusAt = state.profile.appBonusAt
       if (state.profile.cardWishlistJoined !== undefined) lu.cardWishlistJoined = state.profile.cardWishlistJoined
+      if (state.profile.referralCount !== undefined) { lu.referralCount = state.profile.referralCount; lu.referralTotal = state.profile.referralTotal ?? state.profile.referralCount; lu.referralEarningsBdt = state.profile.referralEarningsBdt ?? 0; lu.hasDeposited = !!state.profile.hasDeposited }
       if (state.profile.photo) lu.photo = state.profile.photo
       if (!lu.fbUid) lu.fbUid = state.profile.id
     }
+    if (Array.isArray(state.myReferrals)) d.myReferrals = state.myReferrals
+    if (Array.isArray(state.referralLeaders)) d.referralLeaders = state.referralLeaders
     // Own linked payment methods are server-authoritative. One-time
     // migration: methods saved locally before the server sync existed are
     // uploaded once instead of being wiped by the empty server list.
@@ -1104,8 +1107,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const cur = dbRef.current
     if (cur.users.some(x => x.email === p.email)) return 'An account with this email already exists.'
     if (cur.users.some(x => x.username === p.username)) return 'That username is taken.'
-    if (p.referralCode && !cur.users.some(x => x.referralCode === p.referralCode)) return 'Referral code not found.'
-    if (p.referralCode && cur.users.find(x => x.referralCode === p.referralCode)?.email === p.email) return 'You cannot refer yourself.'
+    // Referral codes are validated by the SERVER at bootstrap: the local
+    // user list on a fresh device cannot know other users' codes, so the old
+    // local check rejected every real code. Normalize case; the server binds.
+    const refCode = p.referralCode?.trim().toUpperCase() || undefined
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) return 'Enter a valid email address.'
     if (!/^[a-zA-Z0-9_.]{3,20}$/.test(p.username)) return 'Username must be 3–20 characters: letters, numbers, dot or underscore only.'
     if (p.password.length < 6) return 'Password must be at least 6 characters.'
@@ -1118,7 +1123,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const cred = await createUserWithEmailAndPassword(firebaseAuth, p.email, p.password)
       newFbUid = cred.user.uid
       const token = await cred.user.getIdToken()
-      void apiBootstrap(token, { username: p.username, fullName: p.name, pinHash: hashSecret(p.pin), phone: p.phone, referralCode: p.referralCode, deviceLabel: deviceLabel(), turnstileToken: p.turnstileToken, verifyGrant: p.verifyGrant }).then(saveSessionId)
+      void apiBootstrap(token, { username: p.username, fullName: p.name, pinHash: hashSecret(p.pin), phone: p.phone, referralCode: refCode, deviceLabel: deviceLabel(), turnstileToken: p.turnstileToken, verifyGrant: p.verifyGrant }).then(saveSessionId)
     } catch (e: any) {
       const code = e?.code || ''
       if (code === 'auth/email-already-in-use') return 'An account with this email already exists.'
@@ -1128,7 +1133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (code === 'auth/unauthorized-domain') return 'This website domain is not authorized for sign-up yet.'
       return 'Sign-up failed. Please try again.'
     }
-    const referrer = p.referralCode ? cur.users.find(x => x.referralCode === p.referralCode) : undefined
+    const referrer = refCode ? cur.users.find(x => x.referralCode === refCode) : undefined
     const nu: User = {
       id: uid('USR'), fbUid: newFbUid ?? undefined, name: p.name, username: p.username, email: p.email, phone: p.phone,
       passwordHash: hashSecret(p.password), pinHash: hashSecret(p.pin), role: 'user', status: 'active',
@@ -1197,7 +1202,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
   const directWithdraw: Ctx['directWithdraw'] = async (p) => {
     if (!user) return 'Not signed in'
-    if (user.level < 2) return 'Direct Withdraw needs a Level 2 account. Please upgrade first.'
+    if (user.level < 2) return 'Payment needs a Level 2 account. Make a deposit or refer 50 friends to unlock Level 2.'
     if (badAmount(p.amount)) return 'Enter a valid amount.'
     if (user.status === 'frozen') return 'Your wallet is frozen. Contact support.'
     const lim = limitError(user, p.amount); if (lim) return lim

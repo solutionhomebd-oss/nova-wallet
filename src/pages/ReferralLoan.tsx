@@ -11,15 +11,27 @@ export function Referral() {
   const { user, db, toast, t, fmtMoney } = useApp()
   if (!user) return null
   const link = `${location.origin}${import.meta.env.BASE_URL}register?ref=${user.referralCode}`
-  const refs = db.users.filter(u => u.referredBy === user.id)
-  const earnings = db.referralEarnings.filter(r => r.userId === user.id)
-  const totalEarned = earnings.reduce((s, r) => s + r.amount, 0)
-  const leaderboard = useMemo(() => {
+  // Server-authoritative referral data: loadState ships myReferrals,
+  // referralLeaders and profile counters (the local user list holds only
+  // this device's account, so the old local computation always showed 0).
+  const serverRefs = db.myReferrals ?? []
+  const refs: { id: string; name: string; photo?: string; createdAt: string; kyc: string }[] = serverRefs.length
+    ? serverRefs.map(r => ({ id: r.id, name: r.name || r.username, createdAt: r.createdAt, kyc: 'active' }))
+    : db.users.filter(u => u.referredBy === user.id)
+  const totalReferred = user.referralTotal ?? refs.length
+  const activeRefs = user.referralCount ?? refs.filter(r => r.kyc === 'verified').length
+  const txEarnings = db.txs.filter(x => x.userId === user.id && x.category === 'referral' && x.status === 'completed').map(x => ({ id: x.id, userId: user.id, fromUser: 'a referred user', amount: x.amount, createdAt: x.createdAt }))
+  const earnings = txEarnings.length ? txEarnings : db.referralEarnings.filter(r => r.userId === user.id)
+  const totalEarned = user.referralEarningsBdt ?? earnings.reduce((s, r) => s + r.amount, 0)
+  const localLeaderboard = useMemo(() => {
     return db.users.filter(u => u.role === 'user').map(u => ({
       u, count: db.users.filter(x => x.referredBy === u.id).length,
       earned: db.referralEarnings.filter(r => r.userId === u.id).reduce((s, r) => s + r.amount, 0),
     })).sort((a, b) => b.earned - a.earned).slice(0, 5)
   }, [db])
+  const leaderboard: { u: { id: string; name: string; photo?: string }; count: number; earned: number }[] = (db.referralLeaders ?? []).length
+    ? (db.referralLeaders ?? []).map(l => ({ u: { id: l.id, name: l.name }, count: l.count, earned: l.earnedBdt }))
+    : localLeaderboard
   const copy = (t: string, l: string) => { navigator.clipboard?.writeText(t); toast({ kind: 'success', title: l + ' copied' }) }
   return (
     <div>
@@ -28,8 +40,8 @@ export function Referral() {
         <p className="text-xs uppercase tracking-widest font-bold text-white/75">Total referral earnings</p>
         <p className="text-4xl font-extrabold mt-1">{fmtMoney(totalEarned)}</p>
         <div className="grid grid-cols-2 gap-3 mt-4">
-          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Total referred</p><p className="font-extrabold text-lg">{refs.length}</p></div>
-          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Active referrals</p><p className="font-extrabold text-lg">{refs.filter(r => r.kyc === 'verified').length}</p></div>
+          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Total referred</p><p className="font-extrabold text-lg">{totalReferred}</p></div>
+          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Active referrals</p><p className="font-extrabold text-lg">{activeRefs}</p></div>
         </div>
       </div>
       <Card className="p-5 mt-4 space-y-3">
@@ -60,7 +72,7 @@ export function Referral() {
       <h3 className="font-extrabold mt-6 mb-3">My referrals</h3>
       {refs.length === 0 ? <Card><Empty title="No referrals yet" body="Share your link to start earning." /></Card> : (
         <div className="space-y-2">{refs.map(r => (
-          <Card key={r.id} className="p-4 flex items-center gap-3"><Avatar name={r.name} photo={r.photo} /><div className="flex-1"><p className="font-bold">{r.name}</p><p className="text-xs text-slate-400">Joined {fmtDateTime(r.createdAt)}</p></div><Badge tone={r.kyc === 'verified' ? 'green' : 'amber'}>{r.kyc === 'verified' ? 'Active' : r.kyc}</Badge></Card>
+          <Card key={r.id} className="p-4 flex items-center gap-3"><Avatar name={r.name} photo={r.photo} /><div className="flex-1"><p className="font-bold">{r.name}</p><p className="text-xs text-slate-400">Joined {fmtDateTime(r.createdAt)}</p></div><Badge tone={r.kyc === 'verified' || r.kyc === 'active' ? 'green' : 'amber'}>{r.kyc === 'verified' || r.kyc === 'active' ? 'Active' : r.kyc}</Badge></Card>
         ))}</div>
       )}
       <h3 className="font-extrabold mt-6 mb-3">Earnings history</h3>
@@ -465,6 +477,78 @@ export function LoanPage({ view = 'hub' }: { view?: LoanView }) {
         ))}</div>
       )}
       </>)}
+    </div>
+  )
+}
+
+export function LevelPage() {
+  const { user, db, toast, fmtMoney } = useApp()
+  const navigate = useNavigate()
+  if (!user) return null
+  const lvl = db.levels.find(l => l.level === user.level)
+  const refCount = user.referralCount ?? 0
+  const link = `${location.origin}${import.meta.env.BASE_URL}register?ref=${user.referralCode}`
+  const copy = (tx: string, l: string) => { navigator.clipboard?.writeText(tx); toast({ kind: 'success', title: l + ' copied' }) }
+  const pct = Math.min(100, Math.round(refCount / 50 * 100))
+  return (
+    <div>
+      <PageHead title="My Level & Referrals" sub="Your account level, unlock progress and referral rewards" />
+      <div className={`rounded-[28px] bg-gradient-to-br ${lvl?.gradient ?? 'from-violet-600 to-indigo-700'} text-white p-6 shadow-xl`}>
+        <p className="text-xs uppercase tracking-widest font-bold text-white/75">Current level</p>
+        <p className="text-4xl font-extrabold mt-1">Level {user.level}</p>
+        <p className="text-sm text-white/85 mt-1">{lvl?.tagline}</p>
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Daily limit</p><p className="font-extrabold text-lg">{fmtUSDT((lvl?.dailyLimit ?? 0) / db.settings.bdtPerUsd)}</p></div>
+          <div className="rounded-2xl bg-white/15 p-3"><p className="text-[11px] text-white/75">Loan limit</p><p className="font-extrabold text-lg">{fmtUSDT((lvl?.loanLimit ?? 0) / db.settings.bdtPerUsd)}</p></div>
+        </div>
+      </div>
+
+      {user.level < 2 ? (
+        <Card className="p-5 mt-4">
+          <p className="font-extrabold flex items-center gap-2"><Award size={18} className="text-violet-600" /> Unlock Level 2 — pick either way</p>
+          <p className="text-xs text-slate-500 mt-1">Level 2 unlocks automatically the moment either condition is met. Cash Out and Payment need Level 2.</p>
+          <div className="flex items-center gap-3 mt-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4">
+            {user.hasDeposited ? <CheckCircle2 size={22} className="text-emerald-500 shrink-0" /> : <Wallet size={22} className="text-slate-400 shrink-0" />}
+            <div className="flex-1">
+              <p className="font-bold text-sm">Make your first deposit</p>
+              <p className="text-xs text-slate-500">{user.hasDeposited ? 'Done — a deposit is already approved on your account.' : 'Any amount — the first approved deposit unlocks Level 2 instantly.'}</p>
+            </div>
+            {!user.hasDeposited && <Btn onClick={() => navigate('/add')}>Add Money</Btn>}
+          </div>
+          <div className="flex items-center gap-3 mt-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 p-4">
+            <HandCoins size={22} className="text-slate-400 shrink-0" />
+            <div className="flex-1">
+              <p className="font-bold text-sm">Refer 50 friends</p>
+              <p className="text-xs text-slate-500">{refCount}/50 active referrals</p>
+              <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 mt-2 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-violet-600 to-cyan-500 transition-all" style={{ width: pct + '%' }} /></div>
+            </div>
+            <Btn variant="outline" onClick={() => navigate('/referral')}>Invite</Btn>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-5 mt-4">
+          <p className="font-extrabold flex items-center gap-2"><CheckCircle2 size={18} className="text-emerald-500" /> Level 2 unlocked</p>
+          <p className="text-xs text-slate-500 mt-1">Cash Out, Payment and higher limits are active on your account.{user.level < 4 ? ' Levels 3 and 4 are granted by admin review.' : ''}</p>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 mt-4">
+        <Card className="p-4"><p className="text-[11px] text-slate-400 uppercase font-bold">Active referrals</p><p className="font-extrabold text-2xl mt-1">{refCount}</p><p className="text-[11px] text-slate-400">of {user.referralTotal ?? refCount} total joined</p></Card>
+        <Card className="p-4"><p className="text-[11px] text-slate-400 uppercase font-bold">Referral earnings</p><p className="font-extrabold text-2xl mt-1 text-emerald-600">{fmtMoney(user.referralEarningsBdt ?? 0)}</p><p className="text-[11px] text-slate-400">from referred users' deposits</p></Card>
+      </div>
+
+      <Card className="p-5 mt-4 space-y-3">
+        <div className="flex items-center gap-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 px-4 py-3">
+          <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-400 uppercase font-bold">Your referral code</p><p className="font-mono font-extrabold text-lg">{user.referralCode}</p></div>
+          <button onClick={() => copy(user.referralCode, 'Code')} className="p-2.5 rounded-xl bg-white dark:bg-slate-900 shadow"><Copy size={16} /></button>
+        </div>
+        <div className="flex items-center gap-2 rounded-2xl bg-slate-50 dark:bg-slate-800/70 px-4 py-3">
+          <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-400 uppercase font-bold">Referral link</p><p className="font-mono text-xs truncate">{link}</p></div>
+          <button onClick={() => copy(link, 'Link')} className="p-2.5 rounded-xl bg-white dark:bg-slate-900 shadow"><Copy size={16} /></button>
+        </div>
+        <Btn className="w-full" onClick={() => { if (navigator.share) navigator.share({ title: 'Join NovaWallet', text: 'Join NovaWallet with my code ' + user.referralCode, url: link }); else copy(link, 'Link') }}><Share2 size={16} /> Share invite</Btn>
+        <Btn variant="outline" className="w-full" onClick={() => navigate('/referral')}>Open the full Referral page</Btn>
+      </Card>
     </div>
   )
 }

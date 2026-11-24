@@ -29,6 +29,7 @@ const ReceiveMoney = lazyNamed(() => import('./pages/Services'), 'ReceiveMoney')
 const SendMoney = lazyNamed(() => import('./pages/Services'), 'SendMoney')
 const LoanPage = lazyNamed(() => import('./pages/ReferralLoan'), 'LoanPage')
 const Referral = lazyNamed(() => import('./pages/ReferralLoan'), 'Referral')
+const LevelPage = lazyNamed(() => import('./pages/ReferralLoan'), 'LevelPage')
 const DirectWithdraw = lazyNamed(() => import('./pages/Extras'), 'DirectWithdraw')
 const CardsPage = lazyNamed(() => import('./pages/Extras'), 'CardsPage')
 const SupportListPage = lazyNamed(() => import('./pages/SupportPages'), 'SupportListPage')
@@ -200,6 +201,7 @@ export default function App() {
             <Route path="/earn/tasks" element={<TasksPage />} />
             <Route path="/swap" element={<SwapPage />} />
                         <Route path="/referral" element={<Referral />} />
+            <Route path="/level" element={<LevelPage />} />
             <Route path="/loan" element={<LoanPage view="hub" />} />
             <Route path="/loan/apply" element={<LoanPage view="apply" />} />
             <Route path="/loan/active" element={<LoanPage view="active" />} />

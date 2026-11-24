@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Bell, Camera, Car, ChevronRight, Coins, CreditCard, Download, FileText, Fingerprint, Globe, Hash, HelpCircle, KeyRound, Lock, LogOut, Mail, MessageCircle, ScanFace, Send, ShieldCheck, Smartphone, Upload, UserRound, Loader2 } from 'lucide-react'
+import { Award, Bell, Camera, Car, ChevronRight, Coins, CreditCard, Download, FileText, Fingerprint, Globe, Hash, HelpCircle, KeyRound, Lock, LogOut, Mail, MessageCircle, ScanFace, Send, ShieldCheck, Smartphone, Upload, UserRound, Loader2 } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { promptInstall } from '../lib/install'
 import { apiPost } from '../lib/api'
@@ -301,6 +301,13 @@ export default function Profile() {
       </Card>
 
       <Card className="p-2 mt-4">
+        <button onClick={() => navigate('/level')} className="w-full flex items-center gap-3 p-3.5 font-semibold text-[15px] hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-2xl text-left">
+          <span className="text-violet-600"><Award size={18} /></span> My Level & Referrals
+          <span className="ml-auto text-sm font-bold text-violet-600">Level {user.level}{user.referralCount != null ? ` · ${user.referralCount} referrals` : ''}</span>
+        </button>
+      </Card>
+
+      <Card className="p-2 mt-4">
         <button onClick={() => navigate('/install')} className="w-full flex items-center gap-3 p-3.5 font-semibold text-[15px] hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-2xl text-left">
           <span className="text-violet-600"><Download size={18} /></span> Install App
           <span className="ml-auto text-sm font-bold text-violet-600">{user?.appBonusAt ? 'Claimed ✓' : appInstalled ? 'Installed ✓' : '$2 bonus'}</span>
@@ -334,7 +341,7 @@ export default function Profile() {
 
       <SuccessModal open={!!okModal} onClose={() => setOkModal(null)} title={okModal?.title ?? ''} rows={okModal?.rows ?? []} />
       <Modal open={modal === 'levels'} onClose={() => setModal(null)} title={t('account_levels')}>
-        <ModalDesc>Higher levels unlock bigger daily and loan limits with lower fees. Upgrades are reviewed by an admin — never automatic.</ModalDesc>
+        <ModalDesc>Higher levels unlock bigger daily and loan limits with lower fees. Level 2 unlocks automatically with your first approved deposit or 50 referrals; Levels 3–4 are reviewed by an admin.</ModalDesc>
         <div className="space-y-2.5">
           {db.levels.map(l => {
             const isCurrent = l.level === user.level
@@ -360,13 +367,13 @@ export default function Profile() {
                     <p className="text-[11px] text-slate-500 mt-1.5">{depShort ? `Deposit ${fmtUSDT((l.depositRequired - myDep) / db.settings.bdtPerUsd)} more via Add Money to unlock this upgrade.` : '✅ Requirement met — you can request this upgrade.'}</p>
                   </div>
                 )}
-                {isNext && l.level === 2 && user.kyc === 'unverified' && (
-                  <div className="mt-3 rounded-2xl bg-amber-50 dark:bg-amber-500/10 p-3.5">
-                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">{t('kyc_need_level2')}</p>
-                    <Btn variant="outline" className="w-full mt-2.5" onClick={() => setModal('kyc')}>{t('kyc_do_now')}</Btn>
+                {isNext && l.level === 2 && (
+                  <div className="mt-3 rounded-2xl bg-violet-50 dark:bg-violet-500/10 p-3.5">
+                    <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">🔓 Level 2 unlocks automatically — no request needed. Make your first deposit (any amount) or complete 50 referrals.</p>
+                    <Btn variant="outline" className="w-full mt-2.5" onClick={() => { setModal(null); navigate('/level') }}>Track my progress</Btn>
                   </div>
                 )}
-                {isNext && !(l.level === 2 && user.kyc === 'unverified') && <Btn className="w-full mt-3" disabled={pending || depShort} onClick={async () => { const e = await requestUpgrade(l.level); if (e) toast({ kind: 'error', title: e }); else { setModal(null); setOkModal({ title: 'Upgrade requested ✓', rows: [['Target', 'Level ' + l.level], ['Status', 'Pending review'], ['Note', 'An admin will review your request.']] }) } }}>{pending ? 'Request pending…' : depShort ? 'Deposit required first' : 'Request upgrade to Level ' + l.level}</Btn>}
+                {isNext && l.level !== 2 && <Btn className="w-full mt-3" disabled={pending || depShort} onClick={async () => { const e = await requestUpgrade(l.level); if (e) toast({ kind: 'error', title: e }); else { setModal(null); setOkModal({ title: 'Upgrade requested ✓', rows: [['Target', 'Level ' + l.level], ['Status', 'Pending review'], ['Note', 'An admin will review your request.']] }) } }}>{pending ? 'Request pending…' : depShort ? 'Deposit required first' : 'Request upgrade to Level ' + l.level}</Btn>}
               </div>
             )
           })}

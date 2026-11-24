@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CheckCircle2, Copy, Download, Share2, Upload, XCircle, Zap } from 'lucide-react'
+import { Award, CheckCircle2, Copy, Download, Share2, Upload, XCircle, Zap } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useApp } from '../lib/store'
 import { Avatar, Badge, Btn, Card, CheckLine, CopyBtn, Empty, FeatureOff, Input, Modal, PinField, Select, StepBar, StepUpField, WizardNav, statusTone , MaxBtn } from '../components/ui'
@@ -192,6 +192,7 @@ export function AddMoney() {
 
 export function CashOut() {
   const { requestWithdraw, db, user, walletOf, toast, t, currency, fmtMoney, toBDT, fromBDT, stepUp } = useApp()
+  const navigate = useNavigate()
   const [method, setMethod] = useState(''); const [amount, setAmount] = useState(''); const [dest, setDest] = useState(''); const [pin, setPin] = useState(''); const [network, setNetwork] = useState('')
   const [done, setDone] = useState(false); const [cstep, setCstep] = useState(0); const [errMsg, setErrMsg] = useState('')
   const [stepPw, setStepPw] = useState('')
@@ -211,6 +212,7 @@ export function CashOut() {
   const submit = async () => {
     if (!amtBDT || amtBDT < 50) return toast({ kind: 'error', title: 'Minimum cash out is ' + fmtMoney(50) })
     if (!dest.trim()) return toast({ kind: 'error', title: 'Enter the destination account' })
+    if (user && user.level < 2) return toast({ kind: 'error', title: 'Level 2 required', body: 'Cash out unlocks at Level 2 — make a deposit or refer 50 friends.' })
     const suThC = db.settings.stepUpThresholdBdt ?? 0
     if (suThC && amtBDT > suThC) {
       if (!stepPw) return setErrMsg('This cash out is above ৳' + suThC.toLocaleString() + ' — enter your account password for the extra verification.')
@@ -230,6 +232,13 @@ export function CashOut() {
   return (
     <div>
       <PageHead title={t('cashout_title')} sub={`${t('available')} (cash): ${fmtMoney(w?.available ?? 0)}${(w?.holdings.USDT ?? 0) > 0 ? ` · Incl. USDT: ${fmtMoney((w?.available ?? 0) + (w?.holdings.USDT ?? 0) * db.settings.bdtPerUsd)}` : ''} · Fee ${Number(effPct.toFixed(2))}%${disc ? ` (Level ${user?.level} −${disc}%)` : ''} · Daily limit ${fmtMoney(db.levels.find(l => l.level === user?.level)?.dailyLimit ?? 0)}`} />
+      {user && user.level < 2 && (
+        <div className="rounded-2xl border border-amber-300/70 bg-amber-50 dark:bg-amber-500/10 p-4 mb-4 flex items-center gap-3">
+          <Award size={20} className="text-amber-500 shrink-0" />
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Cash out needs Level 2. It unlocks automatically with your first deposit or 50 referrals.</p>
+          <Btn variant="outline" onClick={() => navigate('/level')}>Unlock</Btn>
+        </div>
+      )}
       <Card className="p-5">
         <StepBar steps={['Details', 'Review', 'Confirm']} current={cstep} />
         {cstep === 0 && (

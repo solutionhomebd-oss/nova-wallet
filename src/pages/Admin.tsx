@@ -169,6 +169,24 @@ export default function Admin() {
   const [setForm, setSetForm] = useState({ ...db.settings })
   const [pmList, setPmList] = useState<PayMethod[] | null>(null)
   useEffect(() => { if (tab === 'payments' && pmList === null) setPmList(db.settings.payMethods.map(m => ({ ...m }))) }, [tab, pmList, db.settings.payMethods])
+  const [pmEdit, setPmEdit] = useState<{ idx: number | null; draft: PayMethod } | null>(null)
+  const [pmDel, setPmDel] = useState<PayMethod | null>(null)
+  const savePm = () => {
+    if (!pmEdit || !pmList) return
+    const d = pmEdit.draft
+    if (!d.label.trim()) return toast({ kind: 'error', title: d.kind === 'crypto' ? 'Enter the coin / asset' : 'Enter the bank name' })
+    const dup = pmList.some((m, j) => j !== pmEdit.idx && m.kind === d.kind && (m.label ?? '').trim().toLowerCase() === d.label.trim().toLowerCase() && (d.kind === 'bank' ? ((d.accountNumber ?? '') !== '' && (m.accountNumber ?? '') === (d.accountNumber ?? '')) : (m.network ?? '') === (d.network ?? '')))
+    if (dup) return toast({ kind: 'error', title: 'Already added', body: 'This payment method is already in the list.' })
+    const next = pmEdit.idx === null ? [...pmList, d] : pmList.map((m, j) => j === pmEdit.idx ? d : m)
+    setPmList(next); updateSettings({ payMethods: next }); setPmEdit(null)
+    toast({ kind: 'success', title: 'Payment method saved', body: 'Add Money now shows the updated list.' })
+  }
+  const deletePm = () => {
+    if (!pmDel || !pmList) return
+    const next = pmList.filter(m => m.id !== pmDel.id)
+    setPmList(next); updateSettings({ payMethods: next }); setPmDel(null)
+    toast({ kind: 'success', title: 'Payment method removed', body: 'Customers no longer see it in Add Money.' })
+  }
   const [levelForms, setLevelForms] = useState<Record<number, any>>({})
   const [feeInputs, setFeeInputs] = useState<Record<string, string>>({})
 
@@ -680,52 +698,73 @@ export default function Admin() {
           <div className="anim-fade-up space-y-4">
             <Card className="p-5">
               <h3 className="font-extrabold">Payment Methods</h3>
-              <p className="text-sm text-slate-500 mt-1 leading-relaxed">The bank accounts and crypto wallets customers send money to. This one list is shown in <b>Add Money</b> (with copy buttons), in loan-fee payments and in Profile — the same in every country. Bank accounts can carry Routing No, SWIFT Code and branch; crypto entries carry the coin, network and wallet address.</p>
+              <p className="text-sm text-slate-500 mt-1 leading-relaxed">The bank accounts and crypto wallets customers send money to. This one list is shown in <b>Add Money</b> (with copy buttons), in loan-fee payments and in Profile — the same in every country.</p>
+              <Btn className="w-full py-3 mt-4" onClick={() => setPmEdit({ idx: null, draft: { id: 'pm' + Date.now(), kind: 'bank', label: '', accountName: '', accountNumber: '', routing: '', swift: '', branch: '', verification: 'manual' } })}>＋ Add payment method</Btn>
             </Card>
-            {pmList.map((pm, i) => {
-              const setPm = (patch: Partial<PayMethod>) => setPmList(list => (list ?? []).map((x, j) => j === i ? { ...x, ...patch } : x))
-              return (
-                <Card key={pm.id} className="p-5 space-y-3.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold ${pm.kind === 'crypto' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' : 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'}`}>{pm.kind === 'crypto' ? '₿ Crypto wallet' : '🏦 Bank account'}</span>
-                    <button onClick={() => setPmList(list => (list ?? []).filter((_, j) => j !== i))} className="text-rose-500 font-extrabold text-sm">Remove ✕</button>
+            {pmList.length === 0 ? <Card className="p-5"><Empty title="No payment methods yet" body="Add your first bank account or crypto wallet so customers can deposit." /></Card> : (
+              <Card className="divide-y divide-slate-100 dark:divide-slate-800">
+                {pmList.map((pm, i) => (
+                  <div key={pm.id} className="flex items-center gap-3 p-4">
+                    <span className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0 ${pm.kind === 'crypto' ? 'bg-amber-100 dark:bg-amber-500/15' : 'bg-violet-100 dark:bg-violet-500/15'}`}>{pm.kind === 'crypto' ? '₿' : '🏦'}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold truncate">{pm.kind === 'crypto' ? (pm.label + (pm.network ? ' · ' + pm.network : '')) : pm.label}</p>
+                      <p className="text-xs text-slate-400 truncate">{pm.kind === 'crypto' ? (pm.accountNumber || 'No address set') : ((pm.accountNumber || 'No account number') + (pm.branch ? ' · ' + pm.branch : ''))}</p>
+                    </div>
+                    <Btn variant="outline" className="!py-2 !px-3.5 !text-xs shrink-0" onClick={() => setPmEdit({ idx: i, draft: { ...pm } })}>Edit</Btn>
+                    <Btn variant="danger" className="!py-2 !px-3.5 !text-xs shrink-0" onClick={() => setPmDel(pm)}>Delete</Btn>
                   </div>
-                  <Select label="Type" value={pm.kind} onChange={(e: any) => setPm({ kind: e.target.value })}>
-                    <option value="bank">🏦 Bank account</option>
-                    <option value="crypto">₿ Crypto wallet</option>
-                  </Select>
-                  <Select label="Verification" value={pm.verification ?? 'manual'} onChange={(e: any) => setPm({ verification: e.target.value })}>
-                    <option value="manual">👤 Manual review — admin approves each deposit</option>
-                    <option value="auto">⚡ Auto-verify — settles automatically once a provider is connected</option>
-                  </Select>
-                  {(pm.verification ?? 'manual') === 'auto' && <p className="-mt-1 text-xs text-slate-400 leading-relaxed">Auto deposits are tagged and routed separately in the Finance queue with their normalized reference, ready for a bank API / gateway / SMS-webhook matcher. Until a provider is connected they still wait in the queue — nothing is auto-approved yet.</p>}
-                  {pm.kind === 'bank' ? (
-                    <div className="grid sm:grid-cols-2 gap-3.5">
-                      <Input label="Bank name" placeholder="e.g. BRAC Bank" value={pm.label} onChange={e => setPm({ label: e.target.value })} />
-                      <Input label="Account name / title" placeholder="e.g. NovaWallet" value={pm.accountName ?? ''} onChange={e => setPm({ accountName: e.target.value })} />
-                      <Input label="Account number" placeholder="e.g. 1501200000001" value={pm.accountNumber ?? ''} onChange={e => setPm({ accountNumber: e.target.value })} />
-                      <Input label="Branch" placeholder="e.g. Sylhet Branch" value={pm.branch ?? ''} onChange={e => setPm({ branch: e.target.value })} />
-                      <Input label="Routing No" placeholder="e.g. 060261234" value={pm.routing ?? ''} onChange={e => setPm({ routing: e.target.value })} />
-                      <Input label="SWIFT Code" placeholder="e.g. BRAKBDDH" value={pm.swift ?? ''} onChange={e => setPm({ swift: e.target.value })} />
+                ))}
+              </Card>
+            )}
+            <Modal open={!!pmEdit} onClose={() => setPmEdit(null)} title={pmEdit?.idx === null ? 'Add payment method' : 'Edit payment method'}>
+              {pmEdit && (() => { const d = pmEdit.draft; const selfIdx = pmEdit.idx; const setD = (patch: Partial<PayMethod>) => setPmEdit(cur => cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur)
+                const usedNetworks = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === (d.label ?? '').trim().toLowerCase()).map(m => m.network ?? ''))
+                const networkOptions = CRYPTO_NETWORK_LABELS.filter(n => !usedNetworks.has(n) || n === (d.network ?? ''))
+                return (
+                  <div className="space-y-3.5">
+                    <Select label="Type" value={d.kind} onChange={(e: any) => setD({ kind: e.target.value })}>
+                      <option value="bank">🏦 Bank account</option>
+                      <option value="crypto">₿ Crypto wallet</option>
+                    </Select>
+                    <Select label="Verification" value={d.verification ?? 'manual'} onChange={(e: any) => setD({ verification: e.target.value })}>
+                      <option value="manual">👤 Manual review — admin approves each deposit</option>
+                      <option value="auto">⚡ Auto-verify — settles automatically once a provider is connected</option>
+                    </Select>
+                    {(d.verification ?? 'manual') === 'auto' && <p className="text-xs text-slate-400 leading-relaxed">Auto deposits are tagged and routed separately in the Finance queue with their normalized reference, ready for a bank API / gateway / SMS-webhook matcher. Until a provider is connected they still wait in the queue — nothing is auto-approved yet.</p>}
+                    {d.kind === 'bank' ? (
+                      <div className="grid sm:grid-cols-2 gap-3.5">
+                        <Input label="Bank name" placeholder="e.g. BRAC Bank" value={d.label} onChange={e => setD({ label: e.target.value })} />
+                        <Input label="Account name / title" placeholder="e.g. NovaWallet" value={d.accountName ?? ''} onChange={e => setD({ accountName: e.target.value })} />
+                        <Input label="Account number" placeholder="e.g. 1501200000001" value={d.accountNumber ?? ''} onChange={e => setD({ accountNumber: e.target.value })} />
+                        <Input label="Branch" placeholder="e.g. Sylhet Branch" value={d.branch ?? ''} onChange={e => setD({ branch: e.target.value })} />
+                        <Input label="Routing No" placeholder="e.g. 060261234" value={d.routing ?? ''} onChange={e => setD({ routing: e.target.value })} />
+                        <Input label="SWIFT Code" placeholder="e.g. BRAKBDDH" value={d.swift ?? ''} onChange={e => setD({ swift: e.target.value })} />
+                      </div>
+                    ) : (
+                      <div className="grid sm:grid-cols-2 gap-3.5">
+                        <Input label="Coin / asset" placeholder="e.g. USDT" value={d.label} onChange={e => { const label = e.target.value; const taken = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === label.trim().toLowerCase()).map(m => m.network ?? '')); setD({ label, ...(taken.has(d.network ?? '') ? { network: CRYPTO_NETWORK_LABELS.find(n => !taken.has(n)) ?? d.network } : {}) }) }} />
+                        <Select label="Network / transfer system" value={d.network ?? CRYPTO_NETWORK_LABELS[3]} onChange={(e: any) => setD({ network: e.target.value })}>
+                          {networkOptions.map(n => <option key={n}>{n}</option>)}
+                        </Select>
+                        <Input label="Wallet name (optional)" placeholder="e.g. NovaWallet" value={d.accountName ?? ''} onChange={e => setD({ accountName: e.target.value })} />
+                        <Input label="Wallet address" placeholder="Paste the receiving address" value={d.accountNumber ?? ''} onChange={e => setD({ accountNumber: e.target.value })} />
+                      </div>
+                    )}
+                    {d.kind === 'crypto' && networkOptions.length < CRYPTO_NETWORK_LABELS.length && <p className="text-xs text-slate-400">Networks already added for this coin are hidden from the dropdown — each coin + network can be added only once.</p>}
+                    <div className="flex gap-2 pt-1">
+                      <Btn className="flex-1 py-3" onClick={savePm}>Save</Btn>
+                      <Btn variant="ghost" className="flex-1 py-3" onClick={() => setPmEdit(null)}>Cancel</Btn>
                     </div>
-                  ) : (
-                    <div className="grid sm:grid-cols-2 gap-3.5">
-                      <Input label="Coin / asset" placeholder="e.g. USDT" value={pm.label} onChange={e => setPm({ label: e.target.value })} />
-                      <Select label="Network / transfer system" value={pm.network ?? CRYPTO_NETWORK_LABELS[3]} onChange={(e: any) => setPm({ network: e.target.value })}>
-                        {CRYPTO_NETWORK_LABELS.map(n => <option key={n}>{n}</option>)}
-                      </Select>
-                      <Input label="Wallet name (optional)" placeholder="e.g. NovaWallet" value={pm.accountName ?? ''} onChange={e => setPm({ accountName: e.target.value })} />
-                      <Input label="Wallet address" placeholder="Paste the receiving address" value={pm.accountNumber ?? ''} onChange={e => setPm({ accountNumber: e.target.value })} />
-                    </div>
-                  )}
-                </Card>
-              )
-            })}
-            <div className="flex flex-wrap gap-2">
-              <Btn variant="outline" className="!py-2.5 !text-sm" onClick={() => setPmList(list => [...(list ?? []), { id: 'pm' + Date.now(), kind: 'bank', label: '', accountName: '', accountNumber: '', routing: '', swift: '', branch: '' }])}>＋ Add bank account</Btn>
-              <Btn variant="outline" className="!py-2.5 !text-sm" onClick={() => setPmList(list => [...(list ?? []), { id: 'pm' + Date.now(), kind: 'crypto', label: 'USDT', network: CRYPTO_NETWORK_LABELS[3], accountName: '', accountNumber: '' }])}>＋ Add crypto wallet</Btn>
-            </div>
-            <Btn className="w-full py-3.5" onClick={() => { updateSettings({ payMethods: pmList.filter(m => m.label.trim()) }); toast({ kind: 'success', title: 'Payment methods saved', body: 'Add Money now shows the updated accounts.' }) }}>Save payment methods</Btn>
+                  </div>
+                ) })()}
+            </Modal>
+            <Modal open={!!pmDel} onClose={() => setPmDel(null)} title="Delete payment method?">
+              <p className="text-sm text-slate-500 dark:text-slate-400">Remove <b>{pmDel?.kind === 'crypto' ? (pmDel?.label + (pmDel?.network ? ' · ' + pmDel.network : '')) : pmDel?.label}</b> from the list? Customers will no longer see it in Add Money. This takes effect immediately.</p>
+              <div className="flex gap-2 mt-5">
+                <Btn variant="danger" className="flex-1 py-3" onClick={deletePm}>Delete</Btn>
+                <Btn variant="ghost" className="flex-1 py-3" onClick={() => setPmDel(null)}>Cancel</Btn>
+              </div>
+            </Modal>
           </div>
         )}
 

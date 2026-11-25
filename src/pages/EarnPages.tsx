@@ -103,12 +103,15 @@ export function CheckinPage() {
 }
 
 /* ---------------- View Ads (Adsterra Banner 300x250, in-card) ---------------- */
-function AdsterraBanner() {
+function AdsterraBanner({ cycle }: { cycle: number }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = ref.current
-    if (!el || el.dataset.loaded) return
-    el.dataset.loaded = '1'
+    if (!el) return
+    // Re-run the invoke on EVERY cycle: Adsterra serves a fresh banner (and
+    // counts a new impression) each time its script executes. Loading it
+    // only once made ten watches show — and count as — a single ad.
+    el.innerHTML = ''
     ;(window as unknown as { atOptions?: unknown }).atOptions = {
       key: 'dfa6ed35125429e4aa96f8b0a2ae7b6b',
       format: 'iframe',
@@ -121,7 +124,7 @@ function AdsterraBanner() {
     s.async = true
     s.setAttribute('data-cfasync', 'false')
     el.appendChild(s)
-  }, [])
+  }, [cycle])
   return <div ref={ref} className="w-[300px] max-w-full min-h-[250px]" />
 }
 const AD_INVOKE_URL = 'https://bauval.org/22/dfa6ed35125429e4aa96f8b0a2ae7b6b'
@@ -156,12 +159,16 @@ export function AdsPage() {
   // the lock survives leaving and re-entering the page.
   const pendingKey = 'nw.adPending.' + (user?.id ?? '')
   const [phase, setPhase] = useState<'idle' | 'watching' | 'done'>(() => { try { return localStorage.getItem(pendingKey) ? 'done' : 'idle' } catch { return 'idle' } })
+  const [adCycle, setAdCycle] = useState(0)
+  const [claiming, setClaiming] = useState(false)
+  const claimLock = useRef(false)
   const [progress, setProgress] = useState(0)
   const [checking, setChecking] = useState(false)
   const [blockWarn, setBlockWarn] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => () => { if (timer.current) clearInterval(timer.current) }, [])
   const startWatch = () => {
+    setAdCycle(c => c + 1) // a fresh ad for every watch
     setPhase('watching'); setProgress(0)
     timer.current = setInterval(() => {
       setProgress(p => {
@@ -183,7 +190,10 @@ export function AdsPage() {
     startWatch()
   }
   const claim = async () => {
+    if (claimLock.current) return // one watch = one claim; ignore extra taps
+    claimLock.current = true; setClaiming(true)
     const r = await watchAdReward()
+    claimLock.current = false; setClaiming(false)
     if (r.err) return toast({ kind: 'error', title: r.err })
     try { localStorage.removeItem(pendingKey) } catch { /* ignore */ }
     toast({ kind: 'success', title: 'Ad reward ✓', body: '+' + usd(r.amount ?? 0) + ' · ' + (r.left ?? 0) + ' ads left today · Added to your balance' })
@@ -197,14 +207,14 @@ export function AdsPage() {
       <Card className="p-5">
         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 text-center">Advertisement</p>
         <div className="relative mt-3 rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-800/60 min-h-[250px] flex items-center justify-center">
-          <AdsterraBanner />
+          <AdsterraBanner cycle={adCycle} />
           {phase === 'watching' && <div className="absolute inset-x-0 bottom-0 h-1.5 bg-black/25"><div className="h-full bg-violet-500 transition-all" style={{ width: progress + '%' }} /></div>}
         </div>
         {phase === 'watching' && <p className="text-center text-xs font-bold text-slate-400 mt-2">Your ad is playing — keep this page open…</p>}
         <div className="mt-4"><Pips total={ADS_PER_DAY} used={info.ads} /><p className="text-[11px] font-bold text-slate-400 mt-1.5">{info.ads} of {ADS_PER_DAY} ads watched today</p></div>
         {phase === 'watching' && <p className="text-center text-sm font-bold text-slate-500 mt-4">Watching ad… {Math.ceil((100 - progress) / 10)}s</p>}
         {phase === 'idle' && <Btn className="w-full py-3.5 mt-4" disabled={left <= 0 || checking} onClick={watch}>{left <= 0 ? 'No ads left today' : checking ? 'Checking…' : '▶ Watch ad (10s)'}</Btn>}
-        {phase === 'done' && <Btn className="w-full py-3.5 mt-4" onClick={claim}>Claim reward</Btn>}
+        {phase === 'done' && <Btn className="w-full py-3.5 mt-4" disabled={claiming} onClick={claim}>{claiming ? 'Claiming…' : 'Claim reward'}</Btn>}
         {phase === 'done' && <p className="text-xs font-bold text-amber-500 text-center mt-2">Claim this reward to unlock the next ad.</p>}
         <p className="text-xs text-slate-400 text-center mt-3">The reward is credited to your available balance as soon as you claim it.</p>
       </Card>

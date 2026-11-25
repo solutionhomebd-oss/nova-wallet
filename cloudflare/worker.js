@@ -1232,6 +1232,13 @@ async function handleEarnClaim(request, env, auth, body) {
     "SELECT COUNT(*) AS c FROM transactions WHERE user_id = ? AND category = 'earn' AND note = ? AND created_at >= ? AND created_at < ?"
   ).bind(auth.uid, "earn:" + kind, dayStart, dayEnd).first();
   if (Number(cnt?.c ?? 0) >= cap.perDay) return json(request, { error: "Daily limit reached for this reward." }, 400);
+  if (kind === "ad") {
+    // One watch takes 10s, so two ad claims can never legitimately land
+    // seconds apart — this stops a stuck/double-firing claim button (or an
+    // old cached build) from draining several rewards for a single watch.
+    const lastAd = await db.prepare("SELECT MAX(created_at) AS last FROM transactions WHERE user_id = ? AND category = 'earn' AND note = 'earn:ad'").bind(auth.uid).first();
+    if (lastAd?.last && Date.now() - Date.parse(lastAd.last) < 8000) return json(request, { error: "Please watch the ad fully before claiming again." }, 400);
+  }
   const wallet = await getWallet(db, auth.uid);
   const safeTitle = String(title || "Earn reward").slice(0, 80);
   const t = txStmt(db, { userId: auth.uid, category: "earn", title: safeTitle, amount, note: "earn:" + kind, ip: clientIp(request) });

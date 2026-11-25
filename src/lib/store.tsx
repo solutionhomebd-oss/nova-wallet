@@ -1357,7 +1357,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     { const c = box.credit; if (c) { const err = await claimEarn('checkin', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
   }
-  const watchAdReward: Ctx['watchAdReward'] = async () => {
+  let adClaimBusy = false
+  const watchAdRewardRun: Ctx['watchAdReward'] = async () => {
     if (!user) return { err: 'Not signed in' }
     let out: { err?: string; amount?: number; left?: number } = {}
     const box: { credit: { amount: number; title: string } | null } = { credit: null }
@@ -1372,6 +1373,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })
     { const c = box.credit; if (c) { const err = await claimEarn('ad', c.amount, c.title); if (err) { rollbackEarn(snap); return { err } } } }
     return out
+  }
+  const watchAdReward: Ctx['watchAdReward'] = async () => {
+    if (adClaimBusy) return { err: 'Claim already in progress — please wait.' }
+    adClaimBusy = true
+    try { return await watchAdRewardRun() } finally { adClaimBusy = false }
   }
   const spinReward: Ctx['spinReward'] = async () => {
     if (!user) return { err: 'Not signed in' }

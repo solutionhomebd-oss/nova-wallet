@@ -9,6 +9,7 @@ import LogoLoader, { PageLoader } from '../components/LogoLoader'
 import { fmtDateTime, fmtPrice, fmtUSDT, txAmountCls, txDirection, txSign } from '../lib/utils'
 import { COIN_META, useMarket } from '../lib/market'
 import { CRYPTO_NETWORK_LABELS } from '../lib/localPayments'
+const CRYPTO_COINS = ['USDT', 'USDC', 'DAI', 'BUSD', 'BTC', 'ETH', 'BNB', 'TRX', 'LTC', 'DOGE', 'XRP', 'SOL', 'ADA', 'DOT', 'MATIC', 'AVAX', 'LINK', 'ATOM', 'XLM', 'TON']
 import type { AutoChecks, PayMethod } from '../lib/types'
 
 import { TABS, SCOPE_TABS, AdminMenuNav } from '../components/AdminShell'
@@ -699,10 +700,7 @@ export default function Admin() {
             <Card className="p-5">
               <h3 className="font-extrabold">Payment Methods</h3>
               <p className="text-sm text-slate-500 mt-1 leading-relaxed">The bank accounts and crypto wallets customers send money to. This one list is shown in <b>Add Money</b> (with copy buttons), in loan-fee payments and in Profile — the same in every country.</p>
-              {(() => { const usedKinds = new Set(pmList.map(m => m.kind)); const bothUsed = usedKinds.has('bank') && usedKinds.has('crypto')
-                return bothUsed ? <p className="text-xs text-slate-400 text-center mt-4 leading-relaxed">Bank account and Crypto wallet are both added — each type can be added once. Edit or delete one from the list below to change it.</p> : (
-                  <Btn className="w-full py-3 mt-4" onClick={() => { const kind = !usedKinds.has('crypto') ? 'crypto' : 'bank'; setPmEdit({ idx: null, draft: kind === 'crypto' ? { id: 'pm' + Date.now(), kind: 'crypto', label: 'USDT', network: CRYPTO_NETWORK_LABELS[3], accountName: '', accountNumber: '', verification: 'manual' } : { id: 'pm' + Date.now(), kind: 'bank', label: '', accountName: '', accountNumber: '', routing: '', swift: '', branch: '', verification: 'manual' } }) }}>＋ Add payment method</Btn>
-                ) })()}
+              <Btn className="w-full py-3 mt-4" onClick={() => { const usedFor = (coin: string) => new Set(pmList.filter(m => m.kind === 'crypto' && (m.label ?? '').trim().toLowerCase() === coin.toLowerCase()).map(m => m.network ?? '')); const coin = CRYPTO_COINS.find(c => usedFor(c).size < CRYPTO_NETWORK_LABELS.length) ?? 'USDT'; const net = CRYPTO_NETWORK_LABELS.find(n => !usedFor(coin).has(n)) ?? CRYPTO_NETWORK_LABELS[3]; setPmEdit({ idx: null, draft: { id: 'pm' + Date.now(), kind: 'crypto', label: coin, network: net, accountName: '', accountNumber: '', verification: 'manual' } }) }}>＋ Add payment method</Btn>
             </Card>
             {pmList.length === 0 ? <Card className="p-5"><Empty title="No payment methods yet" body="Add your first bank account or crypto wallet so customers can deposit." /></Card> : (
               <Card className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -721,13 +719,15 @@ export default function Admin() {
             )}
             <Modal open={!!pmEdit} onClose={() => setPmEdit(null)} title={pmEdit?.idx === null ? 'Add payment method' : 'Edit payment method'}>
               {pmEdit && (() => { const d = pmEdit.draft; const selfIdx = pmEdit.idx; const setD = (patch: Partial<PayMethod>) => setPmEdit(cur => cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur)
-                const kindOptions = (['bank', 'crypto'] as const).filter(k => k === d.kind || !pmList.some((m, j) => j !== selfIdx && m.kind === k))
+                const coinUsedCount = (c: string) => pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === c.toLowerCase()).length
+                const coinOptions = [...new Set([d.label, ...CRYPTO_COINS])].filter(c => !!c && (c === d.label || coinUsedCount(c) < CRYPTO_NETWORK_LABELS.length))
                 const usedNetworks = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === (d.label ?? '').trim().toLowerCase()).map(m => m.network ?? ''))
                 const networkOptions = CRYPTO_NETWORK_LABELS.filter(n => !usedNetworks.has(n) || n === (d.network ?? ''))
                 return (
                   <div className="space-y-3.5">
                     <Select label="Type" value={d.kind} onChange={(e: any) => { const k = e.target.value; setD(k === 'crypto' ? { kind: k, network: d.network ?? CRYPTO_NETWORK_LABELS[3] } : { kind: k }) }}>
-                      {kindOptions.map(k => <option key={k} value={k}>{k === 'crypto' ? '₿ Crypto wallet' : '🏦 Bank account'}</option>)}
+                      <option value="bank">🏦 Bank account</option>
+                      <option value="crypto">₿ Crypto wallet</option>
                     </Select>
                     <Select label="Verification" value={d.verification ?? 'manual'} onChange={(e: any) => setD({ verification: e.target.value })}>
                       <option value="manual">👤 Manual review — admin approves each deposit</option>
@@ -745,7 +745,9 @@ export default function Admin() {
                       </div>
                     ) : (
                       <div className="grid sm:grid-cols-2 gap-3.5">
-                        <Input label="Coin / asset" placeholder="e.g. USDT" value={d.label} onChange={e => { const label = e.target.value; const taken = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === label.trim().toLowerCase()).map(m => m.network ?? '')); setD({ label, ...(taken.has(d.network ?? '') ? { network: CRYPTO_NETWORK_LABELS.find(n => !taken.has(n)) ?? d.network } : {}) }) }} />
+                        <Select label="Coin / asset" value={d.label} onChange={(e: any) => { const label = e.target.value; const taken = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === label.trim().toLowerCase()).map(m => m.network ?? '')); setD({ label, ...(taken.has(d.network ?? '') ? { network: CRYPTO_NETWORK_LABELS.find(n => !taken.has(n)) ?? d.network } : {}) }) }}>
+                          {coinOptions.map(c => <option key={c}>{c}</option>)}
+                        </Select>
                         <Select label="Network / transfer system" value={d.network ?? CRYPTO_NETWORK_LABELS[3]} onChange={(e: any) => setD({ network: e.target.value })}>
                           {networkOptions.map(n => <option key={n}>{n}</option>)}
                         </Select>
@@ -753,7 +755,7 @@ export default function Admin() {
                         <Input label="Wallet address" placeholder="Paste the receiving address" value={d.accountNumber ?? ''} onChange={e => setD({ accountNumber: e.target.value })} />
                       </div>
                     )}
-                    {d.kind === 'crypto' && networkOptions.length < CRYPTO_NETWORK_LABELS.length && <p className="text-xs text-slate-400">Networks already added for this coin are hidden from the dropdown — each coin + network can be added only once.</p>}
+                    {d.kind === 'crypto' && <p className="text-xs text-slate-400">Coins and chains already added are hidden from these dropdowns — each coin + chain can be added only once.</p>}
                     <div className="flex gap-2 pt-1">
                       <Btn className="flex-1 py-3" onClick={savePm}>Save</Btn>
                       <Btn variant="ghost" className="flex-1 py-3" onClick={() => setPmEdit(null)}>Cancel</Btn>

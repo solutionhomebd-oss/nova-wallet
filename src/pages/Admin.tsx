@@ -699,7 +699,10 @@ export default function Admin() {
             <Card className="p-5">
               <h3 className="font-extrabold">Payment Methods</h3>
               <p className="text-sm text-slate-500 mt-1 leading-relaxed">The bank accounts and crypto wallets customers send money to. This one list is shown in <b>Add Money</b> (with copy buttons), in loan-fee payments and in Profile — the same in every country.</p>
-              <Btn className="w-full py-3 mt-4" onClick={() => setPmEdit({ idx: null, draft: { id: 'pm' + Date.now(), kind: 'bank', label: '', accountName: '', accountNumber: '', routing: '', swift: '', branch: '', verification: 'manual' } })}>＋ Add payment method</Btn>
+              {(() => { const usedKinds = new Set(pmList.map(m => m.kind)); const bothUsed = usedKinds.has('bank') && usedKinds.has('crypto')
+                return bothUsed ? <p className="text-xs text-slate-400 text-center mt-4 leading-relaxed">Bank account and Crypto wallet are both added — each type can be added once. Edit or delete one from the list below to change it.</p> : (
+                  <Btn className="w-full py-3 mt-4" onClick={() => { const kind = !usedKinds.has('crypto') ? 'crypto' : 'bank'; setPmEdit({ idx: null, draft: kind === 'crypto' ? { id: 'pm' + Date.now(), kind: 'crypto', label: 'USDT', network: CRYPTO_NETWORK_LABELS[3], accountName: '', accountNumber: '', verification: 'manual' } : { id: 'pm' + Date.now(), kind: 'bank', label: '', accountName: '', accountNumber: '', routing: '', swift: '', branch: '', verification: 'manual' } }) }}>＋ Add payment method</Btn>
+                ) })()}
             </Card>
             {pmList.length === 0 ? <Card className="p-5"><Empty title="No payment methods yet" body="Add your first bank account or crypto wallet so customers can deposit." /></Card> : (
               <Card className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -718,13 +721,13 @@ export default function Admin() {
             )}
             <Modal open={!!pmEdit} onClose={() => setPmEdit(null)} title={pmEdit?.idx === null ? 'Add payment method' : 'Edit payment method'}>
               {pmEdit && (() => { const d = pmEdit.draft; const selfIdx = pmEdit.idx; const setD = (patch: Partial<PayMethod>) => setPmEdit(cur => cur ? { ...cur, draft: { ...cur.draft, ...patch } } : cur)
+                const kindOptions = (['bank', 'crypto'] as const).filter(k => k === d.kind || !pmList.some((m, j) => j !== selfIdx && m.kind === k))
                 const usedNetworks = new Set(pmList.filter((m, j) => m.kind === 'crypto' && j !== selfIdx && (m.label ?? '').trim().toLowerCase() === (d.label ?? '').trim().toLowerCase()).map(m => m.network ?? ''))
                 const networkOptions = CRYPTO_NETWORK_LABELS.filter(n => !usedNetworks.has(n) || n === (d.network ?? ''))
                 return (
                   <div className="space-y-3.5">
-                    <Select label="Type" value={d.kind} onChange={(e: any) => setD({ kind: e.target.value })}>
-                      <option value="bank">🏦 Bank account</option>
-                      <option value="crypto">₿ Crypto wallet</option>
+                    <Select label="Type" value={d.kind} onChange={(e: any) => { const k = e.target.value; setD(k === 'crypto' ? { kind: k, network: d.network ?? CRYPTO_NETWORK_LABELS[3] } : { kind: k }) }}>
+                      {kindOptions.map(k => <option key={k} value={k}>{k === 'crypto' ? '₿ Crypto wallet' : '🏦 Bank account'}</option>)}
                     </Select>
                     <Select label="Verification" value={d.verification ?? 'manual'} onChange={(e: any) => setD({ verification: e.target.value })}>
                       <option value="manual">👤 Manual review — admin approves each deposit</option>

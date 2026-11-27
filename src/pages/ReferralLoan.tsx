@@ -136,6 +136,7 @@ export function LoanPage({ view = 'hub' }: { view?: LoanView }) {
     return true
   }
   const submit = () => {
+    if (user.level < 2) return toast({ kind: 'error', title: 'Level 2 required', body: 'Loans unlock at Level 2 — reach 82.64 USDT in deposits or refer 50 friends.' })
     const pinErr = verifyTxPin(txPin); if (pinErr) return setErrMsg(pinErr)
     if (!validateDocs()) return
     if (amtBDT < s.minLoan || amtBDT > s.maxLoan) return toast({ kind: 'error', title: `Loan amount must be between ${fmtMoney(s.minLoan)} and ${fmtMoney(s.maxLoan)}` })
@@ -186,6 +187,13 @@ export function LoanPage({ view = 'hub' }: { view?: LoanView }) {
       </Modal>
 
       {view === 'hub' && (<>
+      {user.level < 2 && (
+        <div className="rounded-2xl border border-amber-300/70 bg-amber-50 dark:bg-amber-500/10 p-4 mb-4 flex items-center gap-3">
+          <Award size={20} className="text-amber-500 shrink-0" />
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 flex-1">Loans need Level 2. It unlocks automatically at 82.64 USDT in total deposits or 50 referrals.</p>
+          <Btn variant="outline" onClick={() => navigate('/level')}>Unlock</Btn>
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-3 mb-4">
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Loan limit</p><p className="font-extrabold mt-1">{fmtMoney(effLoanLimit)}</p>{user?.loanLimitOverride ? <p className="text-[10px] text-violet-500 font-bold mt-0.5">Custom limit by admin</p> : null}</Card>
         <Card className="p-4 text-center"><p className="text-[11px] text-slate-400 uppercase font-bold">Outstanding</p><p className="font-extrabold mt-1 text-rose-500">{fmtMoney(outstanding)}</p></Card>

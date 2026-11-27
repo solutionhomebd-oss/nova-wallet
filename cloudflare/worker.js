@@ -1104,6 +1104,8 @@ async function handleLoanApply(request, env, auth, body) {
   if (await featureOff(db, "loans")) return json(request, { error: "Loan applications are temporarily unavailable. Please try again later." }, 403);
   const sgl = await statusGate(db, auth.uid);
   if (sgl) return json(request, { error: sgl }, 400);
+  const lvlRow = await db.prepare("SELECT level FROM users WHERE id = ?").bind(auth.uid).first();
+  if (!lvlRow || Number(lvlRow.level) < 2) return json(request, { error: "Loans need a Level 2 account. Reach 82.64 USDT in total deposits or refer 50 friends to unlock Level 2.", code: "level_required" }, 400);
   const { amount, months, info } = body;
   if (badAmount(amount)) return json(request, { error: "Enter a valid amount." }, 400);
   const settings = await getSettings(db);

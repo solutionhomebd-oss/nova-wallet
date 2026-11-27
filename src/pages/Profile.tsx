@@ -456,7 +456,7 @@ export default function Profile() {
               <>
                 <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200/70 dark:border-emerald-500/20 px-4 py-3.5 text-center">
                   <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">📩 We've sent a 6-digit code to <b>{fp.email}</b>. It expires in 2 minutes.</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">Don't see it in your inbox? Please check your <b>spam or junk folder</b> — sometimes it lands there.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">{t('spam_pre')} <b>{t('spam_folder')}</b> {t('spam_post')}</p>
                   {fpOtpDemo && <p className="text-xs font-bold text-violet-600 dark:text-violet-300 mt-2.5">Demo mode — your code is shown here: <span className="font-mono text-base tracking-[.3em]">{fpOtpDemo}</span></p>}
                 </div>
                 {!fpOtpVerified ? (
